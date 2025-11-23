@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🧱 The Wall
 
 A simple social wall Flutter app where users can register, log in, and post public messages that appear in real-time using **Firebase Authentication** and **Cloud Firestore**.
@@ -144,3 +145,6 @@ In your Firebase Console:
 ## 📝 License
 
 This project is licensed under the MIT License — feel free to modify and share.
+=======
+# TheWall_Flutter
+>>>>>>> 48449a4dc0f7a92a9f34ecba3bad9da9c2fd2806
