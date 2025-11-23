@@ -1,27 +1,27 @@
-<<<<<<< HEAD
-# 🧱 The Wall
+# 🧱 The Wall (Supabase Version)
 
-A simple social wall Flutter app where users can register, log in, and post public messages that appear in real-time using **Firebase Authentication** and **Cloud Firestore**.
+A simple social wall Flutter app where users can register, log in, and post public messages in real time using **Supabase Authentication** and **Supabase Database**.
 
 ---
 
 ## 🚀 Features
 
-- 🔐 **User Authentication** with Firebase (Email & Password)
-- 🧱 **Public Wall** where users can post messages visible to everyone
-- ⚡ **Realtime Updates** using Firestore Streams
-- 📱 **Responsive UI** built with Flutter & Material Design
-- 🔁 **Persistent Login** with Firebase `authStateChanges()`
+- 🔐 **User Authentication** with Supabase (Email & Password)
+- 🧱 **Public Wall** where users post messages visible to everyone
+- ⚡ **Realtime Updates** using Supabase Realtime / Streams
+- 📱 **Modern Flutter UI**
+- 🔁 **Session Persistence** thanks to Supabase Auth
 
 ---
 
 ## 🧩 Tech Stack
 
 - **Frontend:** Flutter (Dart)
-- **Backend:** Firebase
-  - Firebase Authentication
-  - Cloud Firestore
-- **Architecture:** Stateful widgets & component-based UI
+- **Backend:** Supabase  
+  - Supabase Auth  
+  - Supabase Postgres (Database)  
+  - Supabase Realtime (optional)  
+- **Architecture:** Stateful Widgets & Components
 
 ---
 
@@ -29,22 +29,21 @@ A simple social wall Flutter app where users can register, log in, and post publ
 
 ```
 lib/
- ├── main.dart
- ├── firebase_options.dart          # Firebase configuration (auto-generated)
+ ├── main.dart                       # Supabase initialization + App root
  │
  ├── auth/
- │    ├── auth.dart                 # Auth state listener (switches between login/register & home)
- │    ├── login_or_register.dart    # Wrapper for switching login/register screens
- │    ├── login_page.dart           # User sign-in page
- │    └── register_page.dart        # User sign-up page
+ │    ├── auth.dart                  # Listens to Supabase auth state
+ │    ├── login_or_register.dart     # Switch login/register
+ │    ├── login_page.dart            # Login with Supabase
+ │    └── register_page.dart         # Sign up + insert into profiles table
  │
  ├── components/
- │    ├── button.dart               # Custom reusable button widget
- │    ├── text_field.dart           # Custom text field widget
- │    └── wall_post.dart            # UI component for displaying a post
+ │    ├── button.dart
+ │    ├── text_field.dart
+ │    └── wall_post.dart             # Message UI component
  │
  └── pages/
-      └── home_page.dart            # Main wall page (Firestore stream + posting)
+      └── home_page.dart             # Displays messages from Supabase
 ```
 
 ---
@@ -53,71 +52,103 @@ lib/
 
 ### 1️⃣ Prerequisites
 
-- [Flutter SDK](https://flutter.dev/docs/get-started/install)
-- [Firebase CLI](https://firebase.google.com/docs/cli)
-- A configured [Firebase project](https://console.firebase.google.com/)
+- Flutter SDK  
+- A configured **Supabase project**
+- Add Supabase package:
+
+```bash
+flutter pub add supabase_flutter
+```
+
+---
 
 ### 2️⃣ Clone this repository
 
 ```bash
-git clone https://github.com/ZedKaS/Projet_Flutter_Wall.git
-cd thewall
-```
-
-### 3️⃣ Install dependencies
-
-```bash
-flutter pub get
-```
-
-### 4️⃣ Configure Firebase
-
-Run the FlutterFire CLI to connect your Firebase project:
-
-```bash
-flutterfire configure
-```
-
-This generates `lib/firebase_options.dart`.
-
-### 5️⃣ Run the app
-
-```bash
-flutter run
+git clone https://github.com/ZedKaS/TheWall_Flutter.git
+cd TheWall_Flutter
 ```
 
 ---
 
-## 🔥 Firebase Setup Summary
+### 3️⃣ Initialize Supabase in `main.dart`
 
-In your Firebase Console:
-1. Create a new project (e.g., **walltutorial**).
-2. Enable **Authentication → Email/Password**.
-3. Create a **Cloud Firestore** database (in *test mode* for development).
-4. Run the app — a `User Posts` collection will be created automatically when users post messages.
+```dart
+await Supabase.initialize(
+  url: 'https://YOUR-PROJECT.supabase.co',
+  anonKey: 'YOUR-ANON-KEY',
+);
+```
 
 ---
 
-## 🧠 How It Works
+## 🗄️ Supabase Database Setup
 
-- **AuthPage (`auth.dart`)** listens to Firebase Auth state.  
-  If a user is logged in → show `HomePage`, otherwise → show `LoginOrRegister`.
+### Create `profiles` table
 
-- **HomePage** streams posts from Firestore:
-  ```dart
-  FirebaseFirestore.instance
-      .collection("User Posts")
-      .orderBy("TimeStamp", descending: false)
-      .snapshots();
-  ```
+```sql
+create table profiles (
+  id uuid primary key,
+  email text not null,
+  nom text,
+  prenom text,
+  username text unique,
+  created timestamp default now()
+);
+```
 
-- **LoginPage / RegisterPage** handle user authentication via:
-  ```dart
-  FirebaseAuth.instance.signInWithEmailAndPassword(...)
-  FirebaseAuth.instance.createUserWithEmailAndPassword(...)
-  ```
+### Create `posts` table
 
-- **WallPost** displays each post (message + user email).
+```sql
+create table posts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references profiles(id),
+  content text not null,
+  created_at timestamp default now()
+);
+```
+
+Enable RLS + add proper policies in Supabase.
+
+---
+
+## 🧠 How Authentication Works
+
+### 🔑 `auth.dart`
+Listens to:
+
+```dart
+Supabase.instance.client.auth.onAuthStateChange
+```
+
+If user is logged in → **HomePage**  
+Else → **LoginOrRegister**
+
+---
+
+### 🔐 `login_page.dart`
+
+Handles login:
+
+```dart
+supabase.auth.signInWithPassword(
+  email: ...,
+  password: ...,
+);
+```
+
+Shows dialog messages on success/error.
+
+---
+
+### 📝 `register_page.dart`
+
+1. Creates user in Supabase Auth  
+2. Inserts profile into table `profiles`
+
+```dart
+supabase.from('profiles').insert({...});
+```
 
 ---
 
@@ -125,26 +156,22 @@ In your Firebase Console:
 
 | Screen | Description |
 |--------|--------------|
-| 🔐 Login / Register | Firebase Auth (Email/Password) |
-| 🧱 HomePage | Displays real-time user posts from Firestore |
-| 🚪 Logout | Signs out and returns to Auth screen |
+| 🔐 Login / Register | Supabase Auth |
+| 🧱 HomePage | Displays posts |
+| 🚪 Logout | Ends session |
 
 ---
 
 ## 🌟 Future Improvements
 
-- 🖼 Add profile pictures using Firebase Storage  
-- ❤️ Allow likes & comments  
-- 📱 Add dark mode toggle  
-- 💬 Format timestamps as “2 minutes ago”  
-
----
+- Add profile pictures (Supabase Storage)  
+- Likes & comments system  
+- Realtime notifications  
+- Dark Mode  
+- Better timestamp formatting  
 
 ---
 
 ## 📝 License
 
 This project is licensed under the MIT License — feel free to modify and share.
-=======
-# TheWall_Flutter
->>>>>>> 48449a4dc0f7a92a9f34ecba3bad9da9c2fd2806
