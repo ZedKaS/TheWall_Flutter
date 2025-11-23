@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "435568470105",
+    "project_id": "walltutorial-bfd0b",
+    "storage_bucket": "walltutorial-bfd0b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:435568470105:android:b771d630e666ccff996948",
+        "android_client_info": {
+          "package_name": "com.example.thewall"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMZTWoVcYqf7DW-l1uYTOAgepAWyyd34M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
