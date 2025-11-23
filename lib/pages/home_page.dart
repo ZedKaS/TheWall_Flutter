@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thewall/components/text_field.dart';
-import 'package:thewall/components/wall_post.dart';
+
+import 'messages_page.dart';
+import 'profile_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -13,7 +15,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final supabase = Supabase.instance.client;
   final textController = TextEditingController();
-  final imageController = TextEditingController(); // si tu veux ajouter un URL d'image
+  final imageController = TextEditingController();
 
   void signOut() async {
     await supabase.auth.signOut();
@@ -23,7 +25,6 @@ class _HomePageState extends State<HomePage> {
     final user = supabase.auth.currentUser;
     if (user == null) return;
 
-    // Récupérer le profile_id depuis la table profiles
     final profileData = await supabase
         .from('profiles')
         .select('id')
@@ -32,8 +33,7 @@ class _HomePageState extends State<HomePage> {
 
     final profileId = profileData['id'];
 
-    // Post only if content or image is not empty
-    if ((textController.text.isNotEmpty) || (imageController.text.isNotEmpty)) {
+    if (textController.text.isNotEmpty || imageController.text.isNotEmpty) {
       await supabase.from('publications').insert({
         'profile_id': profileId,
         'content': textController.text.isEmpty ? null : textController.text,
@@ -59,35 +59,47 @@ class _HomePageState extends State<HomePage> {
 
     final profileId = profileData['id'];
 
-    // Vérifier si l'utilisateur a déjà liké
     final alreadyLiked = await supabase
         .from('publication_likes')
         .select('*')
         .eq('publication_id', pubId)
         .eq('profile_id', profileId)
-        .single();
+        .maybeSingle();
 
-    if (alreadyLiked != null) return; // ne pas liker 2 fois
+    if (alreadyLiked != null) return;
 
-    // Ajouter like
     await supabase.from('publication_likes').insert({
       'publication_id': pubId,
       'profile_id': profileId,
     });
 
-    // Mettre à jour le compteur
     await supabase.rpc('update_publication_likes', params: {'pub_id': pubId});
+  }
+
+  void _onNavTap(int index) {
+    if (index == 0) return;
+
+    if (index == 1) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MessagesPage()),
+      );
+    } else if (index == 2) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const ProfilePage()),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = supabase.auth.currentUser;
-
     return Scaffold(
       backgroundColor: Colors.grey[300],
       appBar: AppBar(
         title: const Center(
-            child: Text("The Wall", style: TextStyle(color: Colors.white))),
+          child: Text("The Wall", style: TextStyle(color: Colors.white)),
+        ),
         backgroundColor: Colors.grey[900],
         actions: [
           IconButton(
@@ -96,89 +108,109 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+
       body: Column(
         children: [
-          // Publications en temps réel
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: supabase
-                  .from(
-                  'publications:profile_id=profiles.id') // jointure pour récupérer le username
+                  .from('publications')
                   .stream(primaryKey: ['id'])
                   .order('created_at', ascending: false),
               builder: (context, snapshot) {
-                if (snapshot.hasData) {
-                  final publications = snapshot.data!;
-                  return ListView.builder(
-                    itemCount: publications.length,
-                    itemBuilder: (context, index) {
-                      final pub = publications[index];
-                      final content = pub['content'] as String?;
-                      final image = pub['image'] as String?;
-                      final likes = pub['likes'] as int? ?? 0;
-                      final username = pub['profiles']['username'] as String?;
-
-                      return Card(
-                        margin:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        child: Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(username ?? 'Unknown',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                  Text(
-                                    pub['created_at'] != null
-                                        ? DateTime.parse(pub['created_at'])
-                                        .toLocal()
-                                        .toString()
-                                        : '',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                              if (content != null) ...[
-                                const SizedBox(height: 5),
-                                Text(content),
-                              ],
-                              if (image != null) ...[
-                                const SizedBox(height: 5),
-                                Image.network(image),
-                              ],
-                              const SizedBox(height: 5),
-                              Row(
-                                children: [
-                                  Text('Likes: $likes'),
-                                  const SizedBox(width: 10),
-                                  IconButton(
-                                    icon: const Icon(Icons.thumb_up),
-                                    onPressed: () => likePublication(pub['id']),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                } else if (snapshot.hasError) {
-                  return Center(
-                    child: Text("Error: ${snapshot.error}"),
-                  );
+                if (snapshot.hasError) {
+                  return Center(child: Text("Error: ${snapshot.error}"));
                 }
-                return const Center(child: CircularProgressIndicator());
+
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final publications = snapshot.data!;
+                if (publications.isEmpty) {
+                  return const Center(child: Text("No publications yet."));
+                }
+
+                return ListView.builder(
+                  itemCount: publications.length,
+                  itemBuilder: (context, index) {
+                    final pub = publications[index];
+                    final content = pub['content'] as String?;
+                    final image = pub['image'] as String?;
+                    final likes = pub['likes'] as int? ?? 0;
+
+                    // 🔥 Récupération du username via jointure Supabase
+                    final username = pub['profiles']?['username'] ?? 'Unknown';
+
+                    final createdAt = pub['created_at'];
+
+                    String createdAtText = '';
+                    if (createdAt != null) {
+                      final date = DateTime.parse(
+                        createdAt.toString(),
+                      ).toLocal();
+                      createdAtText =
+                          "${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
+                    }
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  username,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  createdAtText,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ),
+
+                            if (content != null) ...[
+                              const SizedBox(height: 5),
+                              Text(content),
+                            ],
+
+                            if (image != null) ...[
+                              const SizedBox(height: 5),
+                              Image.network(image),
+                            ],
+
+                            const SizedBox(height: 5),
+                            Row(
+                              children: [
+                                Text('Likes: $likes'),
+                                const SizedBox(width: 10),
+                                IconButton(
+                                  icon: const Icon(Icons.thumb_up),
+                                  onPressed: () =>
+                                      likePublication(pub['id'].toString()),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
               },
             ),
           ),
 
-          // Ajouter une publication
           Padding(
             padding: const EdgeInsets.all(15.0),
             child: Column(
@@ -202,6 +234,16 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
+        ],
+      ),
+
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: 0,
+        onTap: _onNavTap,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
+          BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
     );
