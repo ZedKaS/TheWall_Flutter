@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thewall/components/text_field.dart';
 
 import 'messages_page.dart';
 import 'profile_page.dart';
+import '../session_manager.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -14,54 +16,51 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final supabase = Supabase.instance.client;
+  final sessionManager = SessionManager();
   final textController = TextEditingController();
   final imageController = TextEditingController();
 
-  void signOut() async {
-    await supabase.auth.signOut();
+  Map<String, dynamic> profilesMap = {};
+  late StreamSubscription<List<Map<String, dynamic>>> _profilesSub;
+
+  @override
+  void initState() {
+    super.initState();
+    sessionManager.goOnline();
+
+    // Stream des profils pour récupérer username + online + avatar
+    _profilesSub = supabase.from('profiles').stream(primaryKey: ['id']).listen((
+      profiles,
+    ) {
+      setState(() {
+        profilesMap = {for (var p in profiles) p['id'].toString(): p};
+      });
+    });
   }
 
-  Future<void> postPublication() async {
-    final user = supabase.auth.currentUser;
-    if (user == null) return;
+  @override
+  void dispose() {
+    textController.dispose();
+    imageController.dispose();
+    _profilesSub.cancel();
+    super.dispose();
+  }
 
-    final profileData = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .single();
-
-    final profileId = profileData['id'];
-
-    if (textController.text.isNotEmpty || imageController.text.isNotEmpty) {
-      await supabase.from('publications').insert({
-        'profile_id': profileId,
-        'content': textController.text.isEmpty ? null : textController.text,
-        'image': imageController.text.isEmpty ? null : imageController.text,
-      });
-    }
-
-    setState(() {
-      textController.clear();
-      imageController.clear();
-    });
+  void signOut() async {
+    await sessionManager.goOffline();
+    await supabase.auth.signOut();
+    Navigator.popUntil(context, (route) => route.isFirst);
   }
 
   Future<void> likePublication(String pubId) async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
 
-    final profileData = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .single();
-
-    final profileId = profileData['id'];
+    final profileId = user.id;
 
     final alreadyLiked = await supabase
         .from('publication_likes')
-        .select('*')
+        .select()
         .eq('publication_id', pubId)
         .eq('profile_id', profileId)
         .maybeSingle();
@@ -74,6 +73,24 @@ class _HomePageState extends State<HomePage> {
     });
 
     await supabase.rpc('update_publication_likes', params: {'pub_id': pubId});
+  }
+
+  Future<void> postPublication() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    if (textController.text.isNotEmpty || imageController.text.isNotEmpty) {
+      await supabase.from('publications').insert({
+        'profile_id': user.id,
+        'content': textController.text.isEmpty ? null : textController.text,
+        'image': imageController.text.isEmpty ? null : imageController.text,
+      });
+    }
+
+    setState(() {
+      textController.clear();
+      imageController.clear();
+    });
   }
 
   void _onNavTap(int index) {
@@ -90,6 +107,15 @@ class _HomePageState extends State<HomePage> {
         MaterialPageRoute(builder: (_) => const ProfilePage()),
       );
     }
+  }
+
+  // Helper pour interpréter différents types comme bool
+  bool _toBool(dynamic v) {
+    if (v == null) return false;
+    if (v is bool) return v;
+    if (v is int) return v == 1;
+    if (v is String) return v.toLowerCase() == 'true' || v == '1' || v == 't';
+    return false;
   }
 
   @override
@@ -118,10 +144,6 @@ class _HomePageState extends State<HomePage> {
                   .stream(primaryKey: ['id'])
                   .order('created_at', ascending: false),
               builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text("Error: ${snapshot.error}"));
-                }
-
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -135,15 +157,31 @@ class _HomePageState extends State<HomePage> {
                   itemCount: publications.length,
                   itemBuilder: (context, index) {
                     final pub = publications[index];
-                    final content = pub['content'] as String?;
-                    final image = pub['image'] as String?;
-                    final likes = pub['likes'] as int? ?? 0;
 
-                    // 🔥 Récupération du username via jointure Supabase
-                    final username = pub['profiles']?['username'] ?? 'Unknown';
+                    // Récupérer le profil de l'auteur
+                    final profileId = pub['profile_id'].toString();
+                    final profile = profilesMap[profileId];
 
+                    // Username correct
+                    final username = profile != null
+                        ? profile['username'] ?? 'Unknown'
+                        : 'Unknown';
+
+                    // Online de l'auteur
+                    final authorOnline = profile != null
+                        ? _toBool(profile['online'])
+                        : false;
+
+                    // URL de l'avatar
+                    final avatarUrl =
+                        (profile != null && profile['avatar_url'] != null)
+                        ? supabase.storage
+                              .from('profile-pictures')
+                              .getPublicUrl(profile['avatar_url'])
+                        : null;
+
+                    // Date de création du post
                     final createdAt = pub['created_at'];
-
                     String createdAtText = '';
                     if (createdAt != null) {
                       final date = DateTime.parse(
@@ -152,6 +190,13 @@ class _HomePageState extends State<HomePage> {
                       createdAtText =
                           "${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
                     }
+
+                    // Identification du post de l'utilisateur courant
+                    final currentUser = supabase.auth.currentUser;
+                    final isMyPost =
+                        currentUser != null && currentUser.id == profileId;
+
+                    final bool isGreenDot = isMyPost || authorOnline;
 
                     return Card(
                       margin: const EdgeInsets.symmetric(
@@ -163,14 +208,45 @@ class _HomePageState extends State<HomePage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // Header: Avatar + Username + pastille + date
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                  username,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 15,
+                                      backgroundColor: Colors.grey[300],
+                                      backgroundImage: avatarUrl != null
+                                          ? NetworkImage(avatarUrl)
+                                          : null,
+                                      child: avatarUrl == null
+                                          ? const Icon(
+                                              Icons.person,
+                                              size: 15,
+                                              color: Colors.white,
+                                            )
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      username,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Container(
+                                      width: 10,
+                                      height: 10,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isGreenDot
+                                            ? Colors.green
+                                            : Colors.red,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 Text(
                                   createdAtText,
@@ -179,20 +255,20 @@ class _HomePageState extends State<HomePage> {
                               ],
                             ),
 
-                            if (content != null) ...[
+                            if (pub['content'] != null) ...[
                               const SizedBox(height: 5),
-                              Text(content),
+                              Text(pub['content']),
                             ],
 
-                            if (image != null) ...[
+                            if (pub['image'] != null) ...[
                               const SizedBox(height: 5),
-                              Image.network(image),
+                              Image.network(pub['image']),
                             ],
 
                             const SizedBox(height: 5),
                             Row(
                               children: [
-                                Text('Likes: $likes'),
+                                Text('Likes: ${pub['likes'] ?? 0}'),
                                 const SizedBox(width: 10),
                                 IconButton(
                                   icon: const Icon(Icons.thumb_up),
@@ -211,6 +287,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
+          // Zone de création de post
           Padding(
             padding: const EdgeInsets.all(15.0),
             child: Column(
@@ -236,7 +313,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 0,
         onTap: _onNavTap,
