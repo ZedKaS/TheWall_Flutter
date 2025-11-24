@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../session_manager.dart';
+import 'messages_page.dart';
+import 'add_friends_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -114,6 +116,19 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
+  void _onNavTap(int index) {
+    if (index == 0) {
+      Navigator.pushReplacementNamed(context, '/home');
+    } else if (index == 1) {
+      Navigator.pushReplacementNamed(context, '/messages');
+    } else if (index == 2) {
+      Navigator.pushReplacementNamed(context, '/profile');
+    } else if (index == 3) {
+      // Navigation vers la page AddFriendsPage
+      Navigator.pushReplacementNamed(context, '/addFriends');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (userProfile == null) {
@@ -130,7 +145,13 @@ class _ProfilePageState extends State<ProfilePage> {
         : null;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      backgroundColor: Colors.grey[300],
+      appBar: AppBar(
+        title: const Center(
+          child: Text("Profile", style: TextStyle(color: Colors.white)),
+        ),
+        backgroundColor: Colors.grey[900],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(25),
         child: Column(
@@ -284,17 +305,27 @@ class _ProfilePageState extends State<ProfilePage> {
           ],
         ),
       ),
-
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 2,
-        onTap: (index) {
-          if (index == 0) Navigator.pushReplacementNamed(context, '/home');
-          if (index == 1) Navigator.pushReplacementNamed(context, '/messages');
-        },
+        currentIndex: 2, // Onglet Profile sélectionné
+        onTap: (index) => _onNavTap(index),
+        selectedItemColor: Colors.blue, // Couleur de l'élément sélectionné
+        unselectedItemColor: Color.fromARGB(
+          255,
+          73,
+          73,
+          73,
+        ), // Couleur des éléments non sélectionnés
+        backgroundColor: Colors.white, // Fond de la BottomNavigationBar
+        type: BottomNavigationBarType
+            .fixed, // Pour garder tous les textes visibles
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_add),
+            label: 'Add Friends',
+          ),
         ],
       ),
     );

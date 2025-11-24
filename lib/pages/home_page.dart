@@ -5,6 +5,7 @@ import 'package:thewall/components/text_field.dart';
 
 import 'messages_page.dart';
 import 'profile_page.dart';
+import 'add_friends_page.dart'; // Importer la page AddFriendsPage
 import '../session_manager.dart';
 
 class HomePage extends StatefulWidget {
@@ -28,7 +29,6 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     sessionManager.goOnline();
 
-    // Stream des profils pour récupérer username + online + avatar
     _profilesSub = supabase.from('profiles').stream(primaryKey: ['id']).listen((
       profiles,
     ) {
@@ -105,6 +105,12 @@ class _HomePageState extends State<HomePage> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const ProfilePage()),
+      );
+    } else if (index == 3) {
+      // Navigation vers la page AddFriendsPage
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const AddFriendsPage()),
       );
     }
   }
@@ -286,8 +292,6 @@ class _HomePageState extends State<HomePage> {
               },
             ),
           ),
-
-          // Zone de création de post
           Padding(
             padding: const EdgeInsets.all(15.0),
             child: Column(
@@ -320,7 +324,22 @@ class _HomePageState extends State<HomePage> {
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_add),
+            label: 'Add Friends',
+          ),
         ],
+        selectedItemColor:
+            Colors.blue, // Couleur pour l'élément sélectionné (accentuée)
+        unselectedItemColor: Color.fromARGB(
+          255,
+          73,
+          73,
+          73,
+        ), // Couleur grise pour les éléments non sélectionnés
+        backgroundColor: Colors.white, // Fond de la BottomNavigationBar
+        type: BottomNavigationBarType
+            .fixed, // Important pour que tous les textes soient visibles
       ),
     );
   }

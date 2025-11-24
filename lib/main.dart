@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thewall/pages/home_page.dart';
 import 'package:thewall/pages/messages_page.dart';
 import 'package:thewall/pages/profile_page.dart';
+import 'package:thewall/pages/add_friends_page.dart'; // Assurez-vous d'importer cette page
 import 'session_manager.dart';
 
 void main() async {
@@ -61,6 +62,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         '/home': (_) => const HomePage(),
         '/messages': (_) => const MessagesPage(),
         '/profile': (_) => const ProfilePage(),
+        '/addFriends': (_) => const AddFriendsPage(), // Ajoutez cette ligne
       },
     );
   }
