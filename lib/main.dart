@@ -62,7 +62,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         '/home': (_) => const HomePage(),
         '/messages': (_) => const MessagesPage(),
         '/profile': (_) => const ProfilePage(),
-        '/addFriends': (_) => const AddFriendsPage(), // Ajoutez cette ligne
+        '/addFriends': (_) => const AddFriendsPage(),
       },
     );
   }

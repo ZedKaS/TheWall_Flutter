@@ -1,87 +1,122 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'messages_page.dart';
-import 'profile_page.dart';
+import 'follow_request_page.dart'; // Importer FollowRequestsPage
 
 class AddFriendsPage extends StatefulWidget {
   const AddFriendsPage({super.key});
 
   @override
-  State<AddFriendsPage> createState() => _AddFriendsPageState();
+  _AddFriendsPageState createState() => _AddFriendsPageState();
 }
 
 class _AddFriendsPageState extends State<AddFriendsPage> {
   final supabase = Supabase.instance.client;
-  Map<String, dynamic> profilesMap = {};
-  late StreamSubscription<List<Map<String, dynamic>>> _profilesSub;
+  late Future<List<Map<String, dynamic>>> _usersFuture;
 
   @override
   void initState() {
     super.initState();
-    _fetchUsers(); // Fetch users on page load
+    _usersFuture = _fetchUsers();
   }
 
-  // Fetch users from the database using stream()
-  Future<void> _fetchUsers() async {
-    _profilesSub = supabase.from('profiles').stream(primaryKey: ['id']).listen((
-      profiles,
-    ) {
-      setState(() {
-        profilesMap = {for (var p in profiles) p['id'].toString(): p};
-      });
-    });
-  }
-
-  // Ajouter un ami
-  // Ajouter un ami
-  Future<void> _addFriend(String friendId) async {
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null || userId == friendId) {
-      // Ne pas permettre d'ajouter soi-même comme ami
-      return;
-    }
+  // Fonction pour récupérer tous les utilisateurs sauf l'utilisateur authentifié et ceux qui sont déjà amis
+  Future<List<Map<String, dynamic>>> _fetchUsers() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return [];
 
     try {
-      // Vérifier si la relation d'amitié existe déjà
-      final response = await supabase.from('friends').select().match(
-        {'user_id': userId, 'friend_id': friendId},
-      ).maybeSingle(); // Utilisation de maybeSingle() pour éviter l'erreur si aucune ligne n'est trouvée
+      final friendsResponse = await supabase
+          .from('friends')
+          .select('friend_id')
+          .eq('user_id', user.id);
 
-      // Si aucune relation d'amitié n'est trouvée, on ajoute l'ami
-      if (response == null) {
-        final result = await supabase.from('friends').insert([
-          {'user_id': userId, 'friend_id': friendId},
-        ]);
+      final List<String> friendIds = friendsResponse.isEmpty
+          ? []
+          : List<String>.from(
+              friendsResponse.map((friend) => friend['friend_id']),
+            );
 
-        // Vérifier si result est non null avant d'accéder à l'erreur
-        if (result != null && result.error != null) {
-          throw result.error!; // Lever l'exception si une erreur survient
-        }
+      final usersResponse = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url')
+          .neq('id', user.id);
 
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Ami ajouté avec succès !')));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Vous êtes déjà amis avec cet utilisateur.')),
-        );
-      }
+      final List<Map<String, dynamic>> filteredUsers = usersResponse
+          .where((user) => !friendIds.contains(user['id']))
+          .toList();
+
+      return filteredUsers;
     } catch (e) {
-      // Gérer les erreurs potentielles
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur lors de l\'ajout de l\'ami: $e')),
-      );
+      print('Error fetching users: $e');
+      return [];
     }
   }
 
-  @override
-  void dispose() {
-    _profilesSub.cancel(); // Cancel subscription on dispose
-    super.dispose();
+  // Fonction pour envoyer une demande de follow à un utilisateur
+  Future<void> _sendFollowRequest(String userIdToFollow) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      // Vérifier si une demande de follow existe déjà
+      final existingRequest = await supabase
+          .from('follow_requests')
+          .select()
+          .eq('sender_id', user.id)
+          .eq('receiver_id', userIdToFollow)
+          .maybeSingle();
+
+      // Si une demande existe déjà, on ne l'envoie pas à nouveau
+      if (existingRequest != null) {
+        print('Follow request already sent');
+        return;
+      }
+
+      // Créer la nouvelle demande de follow
+      await supabase.from('follow_requests').insert({
+        'sender_id': user.id,
+        'receiver_id': userIdToFollow,
+        'status': 'pending', // Initialement en attente
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      print('Follow request sent');
+      setState(() {
+        _usersFuture = _fetchUsers(); // Rafraîchir la liste des utilisateurs
+      });
+    } catch (e) {
+      print('Error sending follow request: $e');
+    }
   }
 
-  // Handle Bottom Navigation Bar taps
+  // Fonction pour vérifier si une demande de follow existe
+  Future<String> _getFollowRequestStatus(String userIdToFollow) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return "Follow";
+
+    try {
+      final existingRequest = await supabase
+          .from('follow_requests')
+          .select()
+          .eq('sender_id', user.id)
+          .eq('receiver_id', userIdToFollow)
+          .maybeSingle();
+
+      if (existingRequest != null) {
+        if (existingRequest['status'] == 'pending') {
+          return "En attente";
+        } else {
+          return "Follow";
+        }
+      }
+      return "Follow";
+    } catch (e) {
+      print('Error checking follow request status: $e');
+      return "Follow";
+    }
+  }
+
+  // Gestion de la navigation pour le BottomNavigationBar
   void _onNavTap(int index) {
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/home');
@@ -97,76 +132,118 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[300],
       appBar: AppBar(
-        title: const Center(
-          child: Text("Add Friends", style: TextStyle(color: Colors.white)),
-        ),
+        title: const Text("Add Friends", style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.grey[900],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FollowRequestsPage()),
+              );
+            },
+          ),
+        ],
       ),
-      body: profilesMap.isEmpty
-          ? const Center(child: CircularProgressIndicator()) // Loading state
-          : ListView.builder(
-              itemCount: profilesMap.length,
-              itemBuilder: (context, index) {
-                final user = profilesMap.values.toList()[index];
-                final avatarUrl = user['avatar_url'] != null
-                    ? supabase.storage
-                          .from('profile-pictures')
-                          .getPublicUrl(user['avatar_url'])
-                    : null;
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _usersFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-                return Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Card(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(
-                        12,
-                      ), // Rounded corners
-                      side: BorderSide(
-                        width: 2,
-                        color: const Color.fromARGB(255, 142, 152, 235),
-                      ), // Bold border
-                    ),
-                    elevation: 5, // Shadow effect
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.all(16),
-                      leading: CircleAvatar(
-                        radius: 40, // Larger size for profile image
-                        backgroundImage: avatarUrl != null
-                            ? NetworkImage(avatarUrl)
-                            : null,
-                        child: avatarUrl == null
-                            ? const Icon(Icons.person, size: 40)
-                            : null,
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text("No users found."));
+          }
+
+          final users = snapshot.data!;
+
+          return ListView.builder(
+            itemCount: users.length,
+            itemBuilder: (context, index) {
+              final user = users[index];
+
+              final avatarUrl = user['avatar_url'] != null
+                  ? supabase.storage
+                        .from('profile-pictures')
+                        .getPublicUrl(user['avatar_url'])
+                  : null;
+
+              return Card(
+                margin: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 15,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 5,
+                child: Padding(
+                  padding: const EdgeInsets.all(10.0),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: avatarUrl != null
+                            ? Image.network(
+                                avatarUrl,
+                                width: 50,
+                                height: 50,
+                                fit: BoxFit.cover,
+                              )
+                            : const Icon(Icons.person, size: 50),
                       ),
-                      title: Text(
-                        user['username'],
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      const SizedBox(width: 15),
+                      Text(
+                        user['username'] ?? 'Unknown',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
-                      subtitle: Text(user['email'] ?? "No email"),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.person_add),
-                        onPressed: () {
-                          // Appeler la fonction d'ajout d'ami
-                          _addFriend(user['id']);
+                      const Spacer(),
+                      FutureBuilder<String>(
+                        future: _getFollowRequestStatus(user['id']),
+                        builder: (context, statusSnapshot) {
+                          if (statusSnapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const CircularProgressIndicator();
+                          }
+
+                          final status = statusSnapshot.data;
+
+                          // Si c'est sa propre requête, ne pas afficher le bouton
+                          return (status == "Follow")
+                              ? ElevatedButton(
+                                  onPressed: () =>
+                                      _sendFollowRequest(user['id']),
+                                  child: const Text('Follow'),
+                                )
+                              : ElevatedButton(
+                                  onPressed:
+                                      null, // Désactiver le bouton si la demande est en attente
+                                  child: const Text('En attente'),
+                                );
                         },
                       ),
-                    ),
+                    ],
                   ),
-                );
-              },
-            ),
+                ),
+              );
+            },
+          );
+        },
+      ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 3, // Onglet "Add Friends" sélectionné
-        onTap: (index) => _onNavTap(index),
-        selectedItemColor: Colors.blue, // Couleur de l'élément sélectionné
-        unselectedItemColor: Color.fromARGB(
-          255,
-          73,
-          73,
-          73,
-        ), // Couleur des éléments non sélectionnés
+        currentIndex: 3,
+        onTap:
+            _onNavTap, // Utilisation de la fonction _onNavTap pour la navigation
         backgroundColor: Colors.white, // Fond de la BottomNavigationBar
         type: BottomNavigationBarType
             .fixed, // Pour garder tous les textes visibles
