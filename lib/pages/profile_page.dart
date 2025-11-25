@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-class ProfilePage extends StatelessWidget {
-  const ProfilePage({super.key});
-
-  void _onNavTap(BuildContext context, int index) {
-=======
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -126,50 +117,20 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _onNavTap(int index) {
->>>>>>> main
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/home');
     } else if (index == 1) {
       Navigator.pushReplacementNamed(context, '/messages');
     } else if (index == 2) {
-<<<<<<< HEAD
-      // déjà sur profile
-=======
       Navigator.pushReplacementNamed(context, '/profile');
     } else if (index == 3) {
       // Navigation vers la page AddFriendsPage
       Navigator.pushReplacementNamed(context, '/addFriends');
->>>>>>> main
     }
   }
 
   @override
   Widget build(BuildContext context) {
-<<<<<<< HEAD
-    final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser;
-
-    Future<void> signOut() async {
-      await supabase.auth.signOut();
-      // Ensuite, AuthPage devrait renvoyer vers login/register
-      Navigator.popUntil(context, (route) => route.isFirst);
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.person, size: 80),
-            const SizedBox(height: 10),
-            Text(
-              user?.email ?? 'No email',
-              style: const TextStyle(fontSize: 18),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(onPressed: signOut, child: const Text("Logout")),
-=======
     if (userProfile == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -341,15 +302,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 );
               },
             ),
->>>>>>> main
           ],
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(
-<<<<<<< HEAD
-        currentIndex: 2, // onglet Profile
-        onTap: (index) => _onNavTap(context, index),
-=======
         currentIndex: 2, // Onglet Profile sélectionné
         onTap: (index) => _onNavTap(index),
         selectedItemColor: Colors.blue, // Couleur de l'élément sélectionné
@@ -362,18 +318,14 @@ class _ProfilePageState extends State<ProfilePage> {
         backgroundColor: Colors.white, // Fond de la BottomNavigationBar
         type: BottomNavigationBarType
             .fixed, // Pour garder tous les textes visibles
->>>>>>> main
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-<<<<<<< HEAD
-=======
           BottomNavigationBarItem(
             icon: Icon(Icons.person_add),
             label: 'Add Friends',
           ),
->>>>>>> main
         ],
       ),
     );
