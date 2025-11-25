@@ -5,11 +5,8 @@ import 'package:thewall/components/text_field.dart';
 
 import 'messages_page.dart';
 import 'profile_page.dart';
-<<<<<<< HEAD
-=======
 import 'add_friends_page.dart'; // Importer la page AddFriendsPage
 import '../session_manager.dart';
->>>>>>> main
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,8 +20,6 @@ class _HomePageState extends State<HomePage> {
   final sessionManager = SessionManager();
   final textController = TextEditingController();
   final imageController = TextEditingController();
-<<<<<<< HEAD
-=======
 
   Map<String, dynamic> profilesMap = {};
   late StreamSubscription<List<Map<String, dynamic>>> _profilesSub;
@@ -50,7 +45,6 @@ class _HomePageState extends State<HomePage> {
     _profilesSub.cancel();
     super.dispose();
   }
->>>>>>> main
 
   void signOut() async {
     await sessionManager.goOffline();
@@ -85,17 +79,6 @@ class _HomePageState extends State<HomePage> {
     final user = supabase.auth.currentUser;
     if (user == null) return;
 
-<<<<<<< HEAD
-    final profileData = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .single();
-
-    final profileId = profileData['id'];
-
-=======
->>>>>>> main
     if (textController.text.isNotEmpty || imageController.text.isNotEmpty) {
       await supabase.from('publications').insert({
         'profile_id': user.id,
@@ -132,25 +115,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-<<<<<<< HEAD
-    final profileId = profileData['id'];
-
-    final alreadyLiked = await supabase
-        .from('publication_likes')
-        .select('*')
-        .eq('publication_id', pubId)
-        .eq('profile_id', profileId)
-        .maybeSingle();
-
-    if (alreadyLiked != null) return;
-
-    await supabase.from('publication_likes').insert({
-      'publication_id': pubId,
-      'profile_id': profileId,
-    });
-
-    await supabase.rpc('update_publication_likes', params: {'pub_id': pubId});
-=======
   // Helper pour interpréter différents types comme bool
   bool _toBool(dynamic v) {
     if (v == null) return false;
@@ -158,23 +122,6 @@ class _HomePageState extends State<HomePage> {
     if (v is int) return v == 1;
     if (v is String) return v.toLowerCase() == 'true' || v == '1' || v == 't';
     return false;
->>>>>>> main
-  }
-
-  void _onNavTap(int index) {
-    if (index == 0) return;
-
-    if (index == 1) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MessagesPage()),
-      );
-    } else if (index == 2) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const ProfilePage()),
-      );
-    }
   }
 
   @override
@@ -203,21 +150,10 @@ class _HomePageState extends State<HomePage> {
                   .stream(primaryKey: ['id'])
                   .order('created_at', ascending: false),
               builder: (context, snapshot) {
-<<<<<<< HEAD
-                if (snapshot.hasError) {
-                  return Center(child: Text("Error: ${snapshot.error}"));
-                }
-
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-=======
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
->>>>>>> main
                 final publications = snapshot.data!;
                 if (publications.isEmpty) {
                   return const Center(child: Text("No publications yet."));
@@ -227,17 +163,6 @@ class _HomePageState extends State<HomePage> {
                   itemCount: publications.length,
                   itemBuilder: (context, index) {
                     final pub = publications[index];
-<<<<<<< HEAD
-                    final content = pub['content'] as String?;
-                    final image = pub['image'] as String?;
-                    final likes = pub['likes'] as int? ?? 0;
-
-                    // 🔥 Récupération du username via jointure Supabase
-                    final username = pub['profiles']?['username'] ?? 'Unknown';
-
-                    final createdAt = pub['created_at'];
-
-=======
 
                     // Récupérer le profil de l'auteur
                     final profileId = pub['profile_id'].toString();
@@ -263,7 +188,6 @@ class _HomePageState extends State<HomePage> {
 
                     // Date de création du post
                     final createdAt = pub['created_at'];
->>>>>>> main
                     String createdAtText = '';
                     if (createdAt != null) {
                       final date = DateTime.parse(
@@ -273,8 +197,6 @@ class _HomePageState extends State<HomePage> {
                           "${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
                     }
 
-<<<<<<< HEAD
-=======
                     // Identification du post de l'utilisateur courant
                     final currentUser = supabase.auth.currentUser;
                     final isMyPost =
@@ -282,7 +204,6 @@ class _HomePageState extends State<HomePage> {
 
                     final bool isGreenDot = isMyPost || authorOnline;
 
->>>>>>> main
                     return Card(
                       margin: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -293,16 +214,6 @@ class _HomePageState extends State<HomePage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-<<<<<<< HEAD
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  username,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-=======
                             // Header: Avatar + Username + pastille + date
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -342,7 +253,6 @@ class _HomePageState extends State<HomePage> {
                                       ),
                                     ),
                                   ],
->>>>>>> main
                                 ),
                                 Text(
                                   createdAtText,
@@ -351,16 +261,6 @@ class _HomePageState extends State<HomePage> {
                               ],
                             ),
 
-<<<<<<< HEAD
-                            if (content != null) ...[
-                              const SizedBox(height: 5),
-                              Text(content),
-                            ],
-
-                            if (image != null) ...[
-                              const SizedBox(height: 5),
-                              Image.network(image),
-=======
                             if (pub['content'] != null) ...[
                               const SizedBox(height: 5),
                               Text(pub['content']),
@@ -369,17 +269,12 @@ class _HomePageState extends State<HomePage> {
                             if (pub['image'] != null) ...[
                               const SizedBox(height: 5),
                               Image.network(pub['image']),
->>>>>>> main
                             ],
 
                             const SizedBox(height: 5),
                             Row(
                               children: [
-<<<<<<< HEAD
-                                Text('Likes: $likes'),
-=======
                                 Text('Likes: ${pub['likes'] ?? 0}'),
->>>>>>> main
                                 const SizedBox(width: 10),
                                 IconButton(
                                   icon: const Icon(Icons.thumb_up),
@@ -397,10 +292,6 @@ class _HomePageState extends State<HomePage> {
               },
             ),
           ),
-<<<<<<< HEAD
-
-=======
->>>>>>> main
           Padding(
             padding: const EdgeInsets.all(15.0),
             child: Column(
@@ -426,10 +317,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-<<<<<<< HEAD
-
-=======
->>>>>>> main
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 0,
         onTap: _onNavTap,
@@ -437,9 +324,6 @@ class _HomePageState extends State<HomePage> {
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-<<<<<<< HEAD
-        ],
-=======
           BottomNavigationBarItem(
             icon: Icon(Icons.person_add),
             label: 'Add Friends',
@@ -456,7 +340,6 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: Colors.white, // Fond de la BottomNavigationBar
         type: BottomNavigationBarType
             .fixed, // Important pour que tous les textes soient visibles
->>>>>>> main
       ),
     );
   }
