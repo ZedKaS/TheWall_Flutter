@@ -5,73 +5,87 @@ class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
 
   @override
-  State<MessagesPage> createState() => _MessagesPageState();
+  _MessagesPageState createState() => _MessagesPageState();
 }
 
 class _MessagesPageState extends State<MessagesPage> {
   final supabase = Supabase.instance.client;
-  List<Map<String, dynamic>> friendsList = [];
+
+  late Future<List<Map<String, dynamic>>> _friendsFuture;
 
   @override
   void initState() {
     super.initState();
-    _fetchFriends(); // Récupérer les amis de l'utilisateur connecté
+    _friendsFuture = _fetchFriends();
   }
 
-  // Fonction pour récupérer les amis de l'utilisateur connecté
-  Future<void> _fetchFriends() async {
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null)
-      return; // Si l'utilisateur n'est pas connecté, on ne fait rien
+  // --------------------------------------------------
+  // Fonction pour récupérer les amis de l'utilisateur
+  // --------------------------------------------------
+  Future<List<Map<String, dynamic>>> _fetchFriends() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return [];
 
     try {
-      // 1. Récupérer les amis de l'utilisateur connecté depuis la table 'friends'
       final response = await supabase
           .from('friends')
-          .select('friend_id') // On sélectionne les ID des amis
-          .or(
-            'user_id.eq.$userId,friend_id.eq.$userId',
-          ); // Filtrer par user_id ou friend_id égal à l'ID de l'utilisateur connecté
+          .select('''
+          id,
+          user_id,
+          friend_id,
+          created_at,
+          friend:user_id (
+            username,
+            avatar_url
+          ),
+          me:friend_id (
+            username,
+            avatar_url
+          )
+        ''')
+          .or('user_id.eq.${user.id}, friend_id.eq.${user.id}');
 
-      // Accéder directement aux données et vérifier s'il y a des amis
-      if (response.isEmpty) {
-        throw Exception('Aucun ami trouvé.');
+      final List<Map<String, dynamic>> result = List<Map<String, dynamic>>.from(
+        response,
+      );
+
+      final List<Map<String, dynamic>> finalList = [];
+
+      for (var row in result) {
+        final bool iAmUser = row['user_id'] == user.id;
+
+        final friendData = iAmUser ? row['me'] : row['friend'];
+
+        if (friendData != null) {
+          finalList.add({
+            'username': friendData['username'],
+            'avatar_url': friendData['avatar_url'],
+            'created_at': row['created_at'],
+          });
+        }
       }
 
-      // Extraire les IDs des amis
-      final friendIdsList = response.map((e) => e['friend_id']).toList();
-
-      // 2. Récupérer les informations des amis dans la table 'profiles'
-      for (var friendId in friendIdsList) {
-        final profileResponse = await supabase
-            .from('profiles')
-            .select('id, username, avatar_url')
-            .eq('id', friendId)
-            .single();
-
-        setState(() {
-          // Ajouter le profil à la liste des amis
-          friendsList.add(profileResponse);
-        });
+      // 🔥 Remove duplicates (important)
+      final uniqueFriends = <String, Map<String, dynamic>>{};
+      for (var friend in finalList) {
+        uniqueFriends[friend['username']] = friend;
       }
-    } on AuthException catch (e) {
-      // Gestion des erreurs liées à l'authentification
-      print('Erreur d\'authentification: ${e.message}');
-    } on PostgrestException catch (e) {
-      // Gestion des erreurs liées à la base de données
-      print('Erreur de base de données: ${e.message}');
+
+      return uniqueFriends.values.toList();
     } catch (e) {
-      // Gestion des autres erreurs
-      print('Erreur générale: $e');
+      print("Error fetching friends: $e");
+      return [];
     }
   }
 
-  // Fonction pour gérer les taps de la BottomNavigationBar
+  // --------------------------------------------------
+  // Bottom Navigation
+  // --------------------------------------------------
   void _onNavTap(BuildContext context, int index) {
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/home');
     } else if (index == 1) {
-      // déjà sur messages
+      // already on messages
     } else if (index == 2) {
       Navigator.pushReplacementNamed(context, '/profile');
     } else if (index == 3) {
@@ -82,64 +96,72 @@ class _MessagesPageState extends State<MessagesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[300],
-      appBar: AppBar(
-        title: const Center(
-          child: Text("Messages", style: TextStyle(color: Colors.white)),
-        ),
-        backgroundColor: Colors.grey[900],
-      ),
-      body: friendsList.isEmpty
-          ? const Center(
-              child: CircularProgressIndicator(),
-            ) // Chargement des amis
-          : ListView.builder(
-              itemCount: friendsList.length,
-              itemBuilder: (context, index) {
-                final friend = friendsList[index];
-                final avatarUrl = friend['avatar_url'] != null
-                    ? supabase.storage
-                          .from('profile-pictures')
-                          .getPublicUrl(friend['avatar_url'])
-                    : null;
+      appBar: AppBar(title: const Text("Messages")),
 
-                return Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Card(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        width: 2,
-                        color: const Color.fromARGB(255, 142, 152, 235),
-                      ),
-                    ),
-                    elevation: 5,
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.all(16),
-                      leading: CircleAvatar(
-                        radius: 40,
-                        backgroundImage: avatarUrl != null
-                            ? NetworkImage(avatarUrl)
-                            : null,
-                        child: avatarUrl == null
-                            ? const Icon(Icons.person, size: 40)
-                            : null,
-                      ),
-                      title: Text(
-                        friend['username'],
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(friend['username'] ?? "No username"),
-                      onTap: () {
-                        // Gérer l'ouverture des messages avec l'ami sélectionné
-                      },
-                    ),
+      // --------------------------------------------------
+      // BODY – LISTE DES AMIS
+      // --------------------------------------------------
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _friendsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text("You have no friends yet."));
+          }
+
+          final friends = snapshot.data!;
+
+          return ListView.builder(
+            itemCount: friends.length,
+            itemBuilder: (context, index) {
+              final friend = friends[index];
+              final username = friend['username'] ?? "Unknown";
+              final avatarPath = friend['avatar_url'];
+
+              final avatarUrl = (avatarPath != null && avatarPath.isNotEmpty)
+                  ? supabase.storage
+                        .from('profile-pictures')
+                        .getPublicUrl(avatarPath)
+                  : null;
+
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    radius: 25,
+                    backgroundImage: avatarUrl != null
+                        ? NetworkImage(avatarUrl)
+                        : const NetworkImage(
+                            "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+                          ),
                   ),
-                );
-              },
-            ),
+                  title: Text(
+                    username,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text("Friends since: ${friend['created_at']}"),
+
+                  // 👉 Ici : ouvre conversation (DM) dans le futur
+                  onTap: () {
+                    // Navigator.push(context, MaterialPageRoute(
+                    //   builder: (_) => ChatPage(friendId: ...)
+                    // ));
+                  },
+                ),
+              );
+            },
+          );
+        },
+      ),
+
+      // --------------------------------------------------
+      // BOTTOM NAVIGATION BAR
+      // --------------------------------------------------
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 1, // Onglet Message sélectionné
+        currentIndex: 1,
         onTap: (index) => _onNavTap(context, index),
         selectedItemColor: Colors.blue,
         unselectedItemColor: const Color.fromARGB(255, 73, 73, 73),
