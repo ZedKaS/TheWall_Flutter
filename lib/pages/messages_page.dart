@@ -22,58 +22,81 @@ class _MessagesPageState extends State<MessagesPage> {
     _friendsFuture = _fetchFriends();
   }
 
+  // 🔥 Récupération correcte des amis (sans doublons)
   Future<List<Map<String, dynamic>>> _fetchFriends() async {
     final user = supabase.auth.currentUser;
     if (user == null) return [];
 
-    try {
-      final response = await supabase
-          .from('friends')
-          .select('''
+    final response = await supabase
+        .from('friends')
+        .select('''
           id,
           user_id,
           friend_id,
           created_at,
-          friend:user_id (
-            username,
-            avatar_url
-          ),
-          me:friend_id (
-            username,
-            avatar_url
-          )
+          friend:user_id (username, avatar_url),
+          me:friend_id (username, avatar_url)
         ''')
-          .or('user_id.eq.${user.id}, friend_id.eq.${user.id}');
+        .or('user_id.eq.${user.id}, friend_id.eq.${user.id}');
 
-      final List<Map<String, dynamic>> result = List<Map<String, dynamic>>.from(
-        response,
-      );
+    final List<Map<String, dynamic>> rows = List<Map<String, dynamic>>.from(
+      response,
+    );
 
-      final List<Map<String, dynamic>> finalList = [];
+    // 🔥 ID de l’utilisateur connecté
+    final myId = user.id;
 
-      for (var row in result) {
-        final bool iAmUser = row['user_id'] == user.id;
-        final friendData = iAmUser ? row['me'] : row['friend'];
+    // Liste finale sans doublons
+    final Map<String, Map<String, dynamic>> uniqueFriends = {};
 
-        if (friendData != null) {
-          finalList.add({
-            'id': iAmUser ? row['friend_id'] : row['user_id'], // 🔥 ID de l'ami
-            'username': friendData['username'],
-            'avatar_url': friendData['avatar_url'],
-            'created_at': row['created_at'],
-          });
-        }
-      }
+    for (var row in rows) {
+      final bool iAmUser = row['user_id'] == myId;
 
-      final uniqueFriends = <String, Map<String, dynamic>>{};
-      for (var friend in finalList) {
-        uniqueFriends[friend['username']] = friend;
-      }
+      final friendId = iAmUser ? row['friend_id'] : row['user_id'];
+      final friendData = iAmUser ? row['me'] : row['friend'];
 
-      return uniqueFriends.values.toList();
-    } catch (_) {
-      return [];
+      if (friendData == null) continue;
+
+      uniqueFriends[friendId] = {
+        'id': friendId,
+        'username': friendData['username'],
+        'avatar_url': friendData['avatar_url'],
+        'created_at': row['created_at'],
+      };
     }
+
+    return uniqueFriends.values.toList();
+  }
+
+  // 🔥 Dernier message avec nom de l’expéditeur
+  Future<String> _getLastMessage(String friendId) async {
+    final myId = supabase.auth.currentUser!.id;
+
+    final response = await supabase
+        .from('messages')
+        .select()
+        .or(
+          'and(sender_id.eq.$myId,receiver_id.eq.$friendId),'
+          'and(sender_id.eq.$friendId,receiver_id.eq.$myId)',
+        )
+        .order('created_at', ascending: false)
+        .limit(1);
+
+    if (response.isEmpty) return "No messages yet";
+
+    final msg = response.first;
+
+    final isMe = msg['sender_id'] == myId;
+    final senderName = isMe ? "Moi" : "Lui";
+
+    final text = msg["content"];
+    final image = msg["image_url"];
+
+    if (text != null && image != null) return "$senderName : 📷 + $text";
+    if (image != null) return "$senderName : 📷 Photo";
+    if (text != null) return "$senderName : $text";
+
+    return "$senderName : Message";
   }
 
   void _onNavTap(BuildContext context, int index) {
@@ -83,7 +106,6 @@ class _MessagesPageState extends State<MessagesPage> {
         MaterialPageRoute(builder: (_) => const HomePage()),
       );
     } else if (index == 1) {
-      // already on messages
     } else if (index == 2) {
       Navigator.pushReplacement(
         context,
@@ -104,22 +126,16 @@ class _MessagesPageState extends State<MessagesPage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         centerTitle: true,
-        title: const Text(
-          "Messages",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
+        title: const Text("Messages", style: TextStyle(color: Colors.white)),
       ),
+
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _friendsFuture,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (!snapshot.hasData) {
             return const Center(
               child: CircularProgressIndicator(color: Colors.black),
             );
-          }
-
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text("You have no friends yet."));
           }
 
           final friends = snapshot.data!;
@@ -130,62 +146,77 @@ class _MessagesPageState extends State<MessagesPage> {
             itemBuilder: (context, index) {
               final friend = friends[index];
               final friendId = friend['id'];
-              final username = friend['username'] ?? "Unknown";
+              final username = friend['username'];
               final avatarPath = friend['avatar_url'];
 
-              final avatarUrl = (avatarPath != null && avatarPath.isNotEmpty)
+              final avatarUrl = (avatarPath != null)
                   ? supabase.storage
                         .from('profile-pictures')
                         .getPublicUrl(avatarPath)
                   : null;
 
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 3,
-                child: ListTile(
-                  leading: CircleAvatar(
-                    radius: 25,
-                    backgroundImage: avatarUrl != null
-                        ? NetworkImage(avatarUrl)
-                        : const NetworkImage(
-                            "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-                          ),
-                  ),
-                  title: Text(
-                    username,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text("Friends since: ${friend['created_at']}"),
+              return FutureBuilder<String>(
+                future: _getLastMessage(friendId),
+                builder: (context, msgSnapshot) {
+                  final lastMessage = msgSnapshot.data ?? "Loading...";
 
-                  // 🔥 NAVIGATION VERS CHATPAGE
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ChatPage(
-                          friendId: friendId,
-                          friendUsername: username,
-                          friendAvatarUrl: avatarUrl,
-                        ),
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      vertical: 6,
+                      horizontal: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 3,
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        radius: 25,
+                        backgroundImage: avatarUrl != null
+                            ? NetworkImage(avatarUrl)
+                            : const NetworkImage(
+                                "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+                              ),
                       ),
-                    );
-                  },
-                ),
+
+                      title: Text(
+                        username,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+
+                      subtitle: Text(
+                        lastMessage,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ChatPage(
+                              friendId: friendId,
+                              friendUsername: username,
+                              friendAvatarUrl: avatarUrl,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
               );
             },
           );
         },
       ),
+
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 1,
         onTap: (index) => _onNavTap(context, index),
         backgroundColor: Colors.black,
         selectedItemColor: Colors.white,
         unselectedItemColor: Colors.white54,
-        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
