@@ -23,6 +23,8 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> {
   final supabase = Supabase.instance.client;
   final TextEditingController _controller = TextEditingController();
+  final TextEditingController _editController = TextEditingController();
+
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
 
@@ -43,7 +45,7 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _initPage() async {
     await _loadMyProfile();
     await _loadMessages();
-    await _markAsSeen(); // 🔥 Marquer les messages reçus comme vus
+    await _markAsSeen();
   }
 
   // Charger mon profil
@@ -86,7 +88,7 @@ class _ChatPageState extends State<ChatPage> {
     _scrollToBottom();
   }
 
-  // 🔥 Marquer SEULEMENT les messages reçus comme vus
+  // Marquer messages reçus comme vus
   Future<void> _markAsSeen() async {
     final myId = supabase.auth.currentUser!.id;
 
@@ -109,7 +111,84 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-  // 🔥 Envoi message
+  // 🔥 Modifier un message envoyé
+  Future<void> _editMessage(String messageId, String oldText) async {
+    _editController.text = oldText;
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Modifier le message"),
+        content: TextField(
+          controller: _editController,
+          decoration: const InputDecoration(labelText: "Nouveau message"),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Annuler"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newText = _editController.text.trim();
+              if (newText.isEmpty) return;
+
+              await supabase
+                  .from('messages')
+                  .update({'content': newText})
+                  .eq('id', messageId);
+
+              Navigator.pop(context);
+              await _loadMessages();
+            },
+            child: const Text("Modifier"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 🔥 Supprimer un message envoyé
+  Future<void> _deleteMessage(String messageId) async {
+    await supabase.from('messages').delete().eq('id', messageId);
+    await _loadMessages();
+  }
+
+  // 🔥 Menu d’options (modifier / supprimer)
+  void _showMessageOptions(Map msg) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text("Modifier"),
+              onTap: () {
+                Navigator.pop(context);
+                _editMessage(msg['id'], msg['content'] ?? "");
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text("Supprimer"),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteMessage(msg['id']);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: const Text("Annuler"),
+              onTap: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🔥 Envoyer message
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     final user = supabase.auth.currentUser;
@@ -136,23 +215,19 @@ class _ChatPageState extends State<ChatPage> {
       'image_url': imageUrl,
     };
 
-    try {
-      final inserted = await supabase
-          .from('messages')
-          .insert(messageData)
-          .select()
-          .single();
+    final inserted = await supabase
+        .from('messages')
+        .insert(messageData)
+        .select()
+        .single();
 
-      setState(() {
-        _messages.add(inserted);
-        _selectedImage = null;
-        _controller.clear();
-      });
+    setState(() {
+      _messages.add(inserted);
+      _controller.clear();
+      _selectedImage = null;
+    });
 
-      _scrollToBottom();
-    } catch (e) {
-      debugPrint('Error sending message: $e');
-    }
+    _scrollToBottom();
   }
 
   // Choisir image
@@ -180,7 +255,10 @@ class _ChatPageState extends State<ChatPage> {
                     ),
             ),
             const SizedBox(width: 10),
-            Text(widget.friendUsername, style: TextStyle(color: Colors.white)),
+            Text(
+              widget.friendUsername,
+              style: const TextStyle(color: Colors.white),
+            ),
           ],
         ),
       ),
@@ -194,8 +272,8 @@ class _ChatPageState extends State<ChatPage> {
                   )
                 : ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.all(10),
                     itemCount: _messages.length,
+                    padding: const EdgeInsets.all(10),
                     itemBuilder: (context, index) {
                       final msg = _messages[index];
                       final isMe = msg['sender_id'] == myId;
@@ -212,105 +290,110 @@ class _ChatPageState extends State<ChatPage> {
                         'dd/MM HH:mm',
                       ).format(createdAt);
 
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          mainAxisAlignment: isMe
-                              ? MainAxisAlignment.end
-                              : MainAxisAlignment.start,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (!isMe)
-                              CircleAvatar(
-                                radius: 18,
-                                backgroundImage: avatar != null
-                                    ? NetworkImage(avatar!)
-                                    : null,
-                              ),
-                            if (!isMe) const SizedBox(width: 6),
+                      return GestureDetector(
+                        onLongPress: () {
+                          if (isMe) _showMessageOptions(msg);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: isMe
+                                ? MainAxisAlignment.end
+                                : MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (!isMe)
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundImage: avatar != null
+                                      ? NetworkImage(avatar!)
+                                      : null,
+                                ),
+                              if (!isMe) const SizedBox(width: 6),
 
-                            Flexible(
-                              child: Column(
-                                crossAxisAlignment: isMe
-                                    ? CrossAxisAlignment.end
-                                    : CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    username ?? "",
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
+                              Flexible(
+                                child: Column(
+                                  crossAxisAlignment: isMe
+                                      ? CrossAxisAlignment.end
+                                      : CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      username ?? "",
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                  ),
 
-                                  if (msg["content"] != null)
-                                    Container(
-                                      padding: const EdgeInsets.all(12),
-                                      margin: const EdgeInsets.only(
-                                        top: 4,
-                                        bottom: 3,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: isMe
-                                            ? const Color.fromARGB(255, 0, 0, 0)
-                                            : Colors.grey.shade300,
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        msg["content"],
-                                        style: TextStyle(
+                                    if (msg["content"] != null)
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        margin: const EdgeInsets.only(
+                                          top: 4,
+                                          bottom: 3,
+                                        ),
+                                        decoration: BoxDecoration(
                                           color: isMe
-                                              ? Colors.white
-                                              : Colors.black,
+                                              ? Colors.black
+                                              : Colors.grey.shade300,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          msg["content"],
+                                          style: TextStyle(
+                                            color: isMe
+                                                ? Colors.white
+                                                : Colors.black,
+                                          ),
                                         ),
                                       ),
-                                    ),
 
-                                  if (msg["image_url"] != null)
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Image.network(
-                                        msg["image_url"],
-                                        width: 250,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-
-                                  // 🔥 SEEN SUR TOUS LES MESSAGES
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        formatted,
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.grey,
+                                    if (msg["image_url"] != null)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.network(
+                                          msg["image_url"],
+                                          width: 250,
+                                          fit: BoxFit.cover,
                                         ),
                                       ),
-                                      const SizedBox(width: 6),
 
-                                      Icon(
-                                        Icons.done_all,
-                                        size: 16,
-                                        color: msg['seen'] == true
-                                            ? Colors.blue
-                                            : Colors.grey,
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          formatted,
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Icon(
+                                          Icons.done_all,
+                                          size: 16,
+                                          color: msg['seen'] == true
+                                              ? Colors.blue
+                                              : Colors.grey,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
 
-                            if (isMe) const SizedBox(width: 6),
-                            if (isMe)
-                              CircleAvatar(
-                                radius: 18,
-                                backgroundImage: avatar != null
-                                    ? NetworkImage(avatar!)
-                                    : null,
-                              ),
-                          ],
+                              if (isMe) const SizedBox(width: 6),
+                              if (isMe)
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundImage: avatar != null
+                                      ? NetworkImage(avatar!)
+                                      : null,
+                                ),
+                            ],
+                          ),
                         ),
                       );
                     },
