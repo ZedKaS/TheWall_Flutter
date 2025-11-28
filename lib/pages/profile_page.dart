@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../session_manager.dart';
 import 'messages_page.dart';
 import 'add_friends_page.dart';
+import 'home_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -19,6 +19,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Map<String, dynamic>? userProfile;
   List<Map<String, dynamic>> userPublications = [];
+  int friendsCount = 0;
 
   late StreamSubscription<List<Map<String, dynamic>>> _profileSub;
   late StreamSubscription<List<Map<String, dynamic>>> _pubSub;
@@ -34,36 +35,47 @@ class _ProfilePageState extends State<ProfilePage> {
     currentUserId = user.id;
     sessionManager.goOnline();
 
-    // ---- PROFIL STREAM ----
     _profileSub = supabase
         .from('profiles')
         .stream(primaryKey: ['id'])
         .eq('id', currentUserId)
         .listen((profiles) {
-          setState(() {
-            userProfile = profiles.first;
-          });
-        });
+      setState(() {
+        userProfile = profiles.first;
+      });
+    });
 
-    // ---- MES PUBLICATIONS ----
     _pubSub = supabase
         .from('publications')
         .stream(primaryKey: ['id'])
         .eq('profile_id', currentUserId)
         .order('created_at', ascending: false)
         .listen((pubs) async {
-          for (var p in pubs) {
-            final owner = await supabase
-                .from('profiles')
-                .select()
-                .eq('id', p['profile_id'])
-                .single();
-            p['owner'] = owner;
-          }
-          setState(() {
-            userPublications = pubs;
-          });
-        });
+      for (var p in pubs) {
+        final owner = await supabase
+            .from('profiles')
+            .select()
+            .eq('id', p['profile_id'])
+            .single();
+        p['owner'] = owner;
+      }
+      setState(() {
+        userPublications = pubs;
+      });
+    });
+
+    _fetchFriendsCount();
+  }
+
+  Future<void> _fetchFriendsCount() async {
+    final data = await supabase
+        .from('friends')
+        .select()
+        .eq('user_id', currentUserId);
+
+    setState(() {
+      friendsCount = data.length;
+    });
   }
 
   @override
@@ -87,103 +99,76 @@ class _ProfilePageState extends State<ProfilePage> {
     return "${diff.inDays} j";
   }
 
-  Future<void> uploadAvatar() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile == null) return;
-
-    final fileBytes = await pickedFile.readAsBytes();
-    final fileName =
-        '${currentUserId}_${DateTime.now().millisecondsSinceEpoch}.png';
-
-    // Upload du fichier
-    await supabase.storage
-        .from('profile-pictures')
-        .uploadBinary(
-          fileName,
-          fileBytes,
-          fileOptions: FileOptions(upsert: true),
-        );
-
-    // Mettre à jour le profil
-    await supabase
-        .from('profiles')
-        .update({'avatar_url': fileName})
-        .eq('id', currentUserId);
-
-    setState(() {
-      userProfile!['avatar_url'] = fileName;
-    });
-  }
-
   void _onNavTap(int index) {
     if (index == 0) {
-      Navigator.pushReplacementNamed(context, '/home');
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
     } else if (index == 1) {
-      Navigator.pushReplacementNamed(context, '/messages');
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MessagesPage()));
     } else if (index == 2) {
-      Navigator.pushReplacementNamed(context, '/profile');
+      return;
     } else if (index == 3) {
-      // Navigation vers la page AddFriendsPage
-      Navigator.pushReplacementNamed(context, '/addFriends');
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AddFriendsPage()));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (userProfile == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: Colors.black)),
+      );
     }
 
     final isOnline = userProfile!['online'] ?? false;
 
-    // Obtenir l'URL publique de l'avatar
     final avatarUrl = userProfile!['avatar_url'] != null
-        ? supabase.storage
-              .from('profile-pictures')
-              .getPublicUrl(userProfile!['avatar_url'])
+        ? supabase.storage.from('profile-pictures').getPublicUrl(userProfile!['avatar_url'])
         : null;
 
     return Scaffold(
-      backgroundColor: Colors.grey[300],
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Center(
-          child: Text("Profile", style: TextStyle(color: Colors.white)),
-        ),
-        backgroundColor: Colors.grey[900],
+        backgroundColor: Colors.black,
+        centerTitle: true,
+        title: const Text("Profile", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white),
+            onPressed: () => signOut(context),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(25),
+        padding: const EdgeInsets.all(20),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // -------- AVATAR + USERNAME + PASTILLE ----------
-            Center(
-              child: GestureDetector(
-                onTap: uploadAvatar,
-                child: CircleAvatar(
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const SizedBox(width: 22), // Décalage de 2 espaces pour l'image
+                CircleAvatar(
                   radius: 50,
                   backgroundColor: Colors.grey[300],
-                  backgroundImage: avatarUrl != null
-                      ? NetworkImage(avatarUrl)
-                      : null,
-                  child: avatarUrl == null
-                      ? const Icon(Icons.person, size: 50, color: Colors.white)
-                      : null,
+                  backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                  child: avatarUrl == null ? const Icon(Icons.person, size: 50, color: Colors.white) : null,
                 ),
-              ),
+                const SizedBox(width: 32), // Décalage de 4 espaces pour le compteur
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text("Amis", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    Text("$friendsCount", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ],
             ),
+
             const SizedBox(height: 15),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  "@${userProfile!['username']}",
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                Text("@${userProfile!['username']}", style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 10),
                 Container(
                   width: 12,
@@ -196,43 +181,23 @@ class _ProfilePageState extends State<ProfilePage> {
               ],
             ),
             const SizedBox(height: 20),
-
-            // ------ INFOS ------
-            Text(
-              "Prénom : ${userProfile!['prenom'] ?? ''}",
-              style: const TextStyle(fontSize: 18),
-            ),
-            Text(
-              "Nom : ${userProfile!['nom'] ?? ''}",
-              style: const TextStyle(fontSize: 18),
-            ),
-            Text(
-              "Email : ${userProfile!['email'] ?? ''}",
-              style: const TextStyle(fontSize: 18),
-            ),
-            Text(
-              "Date de création : ${userProfile!['created'] != null ? DateTime.parse(userProfile!['created']).toLocal().toString().split('.')[0] : ''}",
-              style: const TextStyle(fontSize: 18),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("Prénom : ${userProfile!['prenom'] ?? ''}", style: const TextStyle(fontSize: 18)),
+                Text("Nom : ${userProfile!['nom'] ?? ''}", style: const TextStyle(fontSize: 18)),
+                Text("Email : ${userProfile!['email'] ?? ''}", style: const TextStyle(fontSize: 18)),
+                Text(
+                  "Date de création : ${userProfile!['created'] != null ? DateTime.parse(userProfile!['created']).toLocal().toString().split('.')[0] : ''}",
+                  style: const TextStyle(fontSize: 18),
+                ),
+              ],
             ),
             const SizedBox(height: 30),
-
-            Center(
-              child: ElevatedButton(
-                onPressed: () => signOut(context),
-                child: const Text("Logout"),
-              ),
-            ),
-            const SizedBox(height: 35),
-
-            const Text(
-              "Mes publications",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
+            const Text("Mes publications", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
-
             if (userPublications.isEmpty)
               const Text("Aucune publication pour le moment."),
-
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -240,20 +205,18 @@ class _ProfilePageState extends State<ProfilePage> {
               itemBuilder: (context, index) {
                 final pub = userPublications[index];
                 final owner = pub['owner'];
-
                 final bool ownerOnline = owner['online'] ?? false;
                 final bool isMyPost = pub['profile_id'] == currentUserId;
-
                 final bool green = isMyPost || ownerOnline;
 
                 return Card(
+                  color: Colors.white,
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   child: Padding(
                     padding: const EdgeInsets.all(15),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ------ HEADER AVEC NOM + PASTILLE ------
                         Row(
                           children: [
                             Container(
@@ -265,35 +228,23 @@ class _ProfilePageState extends State<ProfilePage> {
                               ),
                             ),
                             const SizedBox(width: 10),
-                            Text(
-                              "@${owner['username']}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
+                            Text("@${owner['username']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                             const Spacer(),
-                            Text(
-                              relativeTime(DateTime.parse(pub['created_at'])),
-                              style: const TextStyle(fontSize: 12),
-                            ),
+                            Text(relativeTime(DateTime.parse(pub['created_at'])), style: const TextStyle(fontSize: 12)),
                           ],
                         ),
                         const SizedBox(height: 10),
                         Text(pub['content'] ?? ''),
                         if (pub['image'] != null) ...[
                           const SizedBox(height: 10),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(pub['image']),
-                          ),
+                          ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.network(pub['image'])),
                         ],
                         const SizedBox(height: 10),
                         Row(
                           children: [
-                            const Icon(Icons.favorite_border),
+                            const Icon(Icons.favorite_border, color: Colors.black),
                             const SizedBox(width: 5),
-                            Text("${pub['likes'] ?? 0}"),
+                            Text("${pub['likes'] ?? 0}", style: const TextStyle(color: Colors.black)),
                           ],
                         ),
                       ],
@@ -306,26 +257,17 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 2, // Onglet Profile sélectionné
-        onTap: (index) => _onNavTap(index),
-        selectedItemColor: Colors.blue, // Couleur de l'élément sélectionné
-        unselectedItemColor: Color.fromARGB(
-          255,
-          73,
-          73,
-          73,
-        ), // Couleur des éléments non sélectionnés
-        backgroundColor: Colors.white, // Fond de la BottomNavigationBar
-        type: BottomNavigationBarType
-            .fixed, // Pour garder tous les textes visibles
+        currentIndex: 2,
+        onTap: _onNavTap,
+        backgroundColor: Colors.black,
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white54,
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_add),
-            label: 'Add Friends',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.person_add), label: 'Add Friends'),
         ],
       ),
     );
