@@ -16,13 +16,28 @@ class _MessagesPageState extends State<MessagesPage> {
   final supabase = Supabase.instance.client;
   late Future<List<Map<String, dynamic>>> _friendsFuture;
 
+  String? myUsername;
+
   @override
   void initState() {
     super.initState();
     _friendsFuture = _fetchFriends();
+    _loadMyUsername();
   }
 
-  // 🔥 Récupération correcte des amis (sans doublons)
+  Future<void> _loadMyUsername() async {
+    final user = supabase.auth.currentUser!;
+    final data = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .single();
+
+    setState(() {
+      myUsername = data['username'];
+    });
+  }
+
   Future<List<Map<String, dynamic>>> _fetchFriends() async {
     final user = supabase.auth.currentUser;
     if (user == null) return [];
@@ -39,23 +54,15 @@ class _MessagesPageState extends State<MessagesPage> {
         ''')
         .or('user_id.eq.${user.id}, friend_id.eq.${user.id}');
 
-    final List<Map<String, dynamic>> rows = List<Map<String, dynamic>>.from(
-      response,
-    );
+    final rows = List<Map<String, dynamic>>.from(response);
 
-    // 🔥 ID de l’utilisateur connecté
     final myId = user.id;
-
-    // Liste finale sans doublons
     final Map<String, Map<String, dynamic>> uniqueFriends = {};
 
     for (var row in rows) {
-      final bool iAmUser = row['user_id'] == myId;
-
+      final iAmUser = row['user_id'] == myId;
       final friendId = iAmUser ? row['friend_id'] : row['user_id'];
       final friendData = iAmUser ? row['me'] : row['friend'];
-
-      if (friendData == null) continue;
 
       uniqueFriends[friendId] = {
         'id': friendId,
@@ -68,8 +75,21 @@ class _MessagesPageState extends State<MessagesPage> {
     return uniqueFriends.values.toList();
   }
 
-  // 🔥 Dernier message avec nom de l’expéditeur
-  Future<String> _getLastMessage(String friendId) async {
+  // 🔥 Unread message count
+  Future<int> _getUnreadCount(String friendId) async {
+    final myId = supabase.auth.currentUser!.id;
+
+    final response = await supabase
+        .from('messages')
+        .select()
+        .eq('sender_id', friendId)
+        .eq('receiver_id', myId)
+        .eq('seen', false);
+
+    return response.length;
+  }
+
+  Future<String> _getLastMessage(String friendId, String friendUsername) async {
     final myId = supabase.auth.currentUser!.id;
 
     final response = await supabase
@@ -87,16 +107,16 @@ class _MessagesPageState extends State<MessagesPage> {
     final msg = response.first;
 
     final isMe = msg['sender_id'] == myId;
-    final senderName = isMe ? "Moi" : "Lui";
+    final senderName = isMe ? "@$myUsername" : "@$friendUsername";
 
     final text = msg["content"];
     final image = msg["image_url"];
 
-    if (text != null && image != null) return "$senderName : 📷 + $text";
-    if (image != null) return "$senderName : 📷 Photo";
-    if (text != null) return "$senderName : $text";
+    if (text != null && image != null) return "$senderName 📷 + $text";
+    if (image != null) return "$senderName 📷 Photo";
+    if (text != null) return "$senderName $text";
 
-    return "$senderName : Message";
+    return "$senderName Message";
   }
 
   void _onNavTap(BuildContext context, int index) {
@@ -105,7 +125,6 @@ class _MessagesPageState extends State<MessagesPage> {
         context,
         MaterialPageRoute(builder: (_) => const HomePage()),
       );
-    } else if (index == 1) {
     } else if (index == 2) {
       Navigator.pushReplacement(
         context,
@@ -123,6 +142,7 @@ class _MessagesPageState extends State<MessagesPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
+
       appBar: AppBar(
         backgroundColor: Colors.black,
         centerTitle: true,
@@ -132,13 +152,16 @@ class _MessagesPageState extends State<MessagesPage> {
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _friendsFuture,
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (!snapshot.hasData || myUsername == null) {
             return const Center(
               child: CircularProgressIndicator(color: Colors.black),
             );
           }
 
           final friends = snapshot.data!;
+          if (friends.isEmpty) {
+            return const Center(child: Text("You have no friends yet."));
+          }
 
           return ListView.builder(
             padding: const EdgeInsets.all(10),
@@ -149,31 +172,39 @@ class _MessagesPageState extends State<MessagesPage> {
               final username = friend['username'];
               final avatarPath = friend['avatar_url'];
 
-              final avatarUrl = (avatarPath != null)
+              final avatarUrl = avatarPath != null
                   ? supabase.storage
                         .from('profile-pictures')
                         .getPublicUrl(avatarPath)
                   : null;
 
-              return FutureBuilder<String>(
-                future: _getLastMessage(friendId),
-                builder: (context, msgSnapshot) {
-                  final lastMessage = msgSnapshot.data ?? "Loading...";
+              return FutureBuilder(
+                future: Future.wait([
+                  _getLastMessage(friendId, username),
+                  _getUnreadCount(friendId),
+                ]),
+                builder: (context, snap) {
+                  if (!snap.hasData) {
+                    return const SizedBox();
+                  }
+
+                  final lastMessage = snap.data![0] as String;
+                  final unreadCount = snap.data![1] as int;
 
                   return Card(
                     margin: const EdgeInsets.symmetric(
                       vertical: 6,
                       horizontal: 10,
                     ),
+                    elevation: 3,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    elevation: 3,
                     child: ListTile(
                       leading: CircleAvatar(
                         radius: 25,
                         backgroundImage: avatarUrl != null
-                            ? NetworkImage(avatarUrl)
+                            ? NetworkImage(avatarUrl!)
                             : const NetworkImage(
                                 "https://cdn-icons-png.flaticon.com/512/149/149071.png",
                               ),
@@ -190,8 +221,35 @@ class _MessagesPageState extends State<MessagesPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
 
-                      onTap: () {
-                        Navigator.push(
+                      trailing: unreadCount > 0
+                          ? Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: const BoxDecoration(
+                                color: Colors.blue,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                unreadCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
+                          : null,
+
+                      onTap: () async {
+                        // Marquer comme lus
+                        final myId = supabase.auth.currentUser!.id;
+
+                        await supabase
+                            .from('messages')
+                            .update({'seen': true})
+                            .eq('sender_id', friendId)
+                            .eq('receiver_id', myId)
+                            .eq('seen', false);
+
+                        await Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (_) => ChatPage(
@@ -201,6 +259,10 @@ class _MessagesPageState extends State<MessagesPage> {
                             ),
                           ),
                         );
+
+                        setState(() {
+                          _friendsFuture = _fetchFriends();
+                        });
                       },
                     ),
                   );
@@ -217,6 +279,7 @@ class _MessagesPageState extends State<MessagesPage> {
         backgroundColor: Colors.black,
         selectedItemColor: Colors.white,
         unselectedItemColor: Colors.white54,
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),

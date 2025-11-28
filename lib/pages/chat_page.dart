@@ -32,7 +32,7 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _messages = [];
 
-  File? _selectedImage; // 👉 preview image before sending
+  File? _selectedImage;
 
   @override
   void initState() {
@@ -43,8 +43,10 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _initPage() async {
     await _loadMyProfile();
     await _loadMessages();
+    await _markAsSeen(); // 🔥 Marquer les messages reçus comme vus
   }
 
+  // Charger mon profil
   Future<void> _loadMyProfile() async {
     final user = supabase.auth.currentUser!;
     final data = await supabase
@@ -63,6 +65,7 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  // Charger les messages
   Future<void> _loadMessages() async {
     final myId = supabase.auth.currentUser!.id;
 
@@ -83,6 +86,21 @@ class _ChatPageState extends State<ChatPage> {
     _scrollToBottom();
   }
 
+  // 🔥 Marquer SEULEMENT les messages reçus comme vus
+  Future<void> _markAsSeen() async {
+    final myId = supabase.auth.currentUser!.id;
+
+    await supabase
+        .from('messages')
+        .update({'seen': true})
+        .eq('receiver_id', myId)
+        .eq('sender_id', widget.friendId)
+        .eq('seen', false);
+
+    await _loadMessages();
+  }
+
+  // Scroll auto
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 300), () {
       if (_scrollController.hasClients) {
@@ -91,6 +109,7 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  // 🔥 Envoi message
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     final user = supabase.auth.currentUser;
@@ -100,9 +119,9 @@ class _ChatPageState extends State<ChatPage> {
 
     String? imageUrl;
 
-    // 🔥 Upload image if exists
     if (_selectedImage != null) {
       final fileName = "msg_${DateTime.now().millisecondsSinceEpoch}.jpg";
+
       await supabase.storage
           .from('chat-pictures')
           .upload(fileName, _selectedImage!);
@@ -136,13 +155,11 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  // Choisir image
   Future<void> _pickImage() async {
     final picked = await _picker.pickImage(source: ImageSource.gallery);
-
     if (picked != null) {
-      setState(() {
-        _selectedImage = File(picked.path);
-      });
+      setState(() => _selectedImage = File(picked.path));
     }
   }
 
@@ -163,17 +180,13 @@ class _ChatPageState extends State<ChatPage> {
                     ),
             ),
             const SizedBox(width: 10),
-            Text(
-              widget.friendUsername,
-              style: const TextStyle(color: Colors.white),
-            ),
+            Text(widget.friendUsername, style: TextStyle(color: Colors.white)),
           ],
         ),
       ),
 
       body: Column(
         children: [
-          // ---------------- LISTE DES MESSAGES ----------------
           Expanded(
             child: _isLoading
                 ? const Center(
@@ -195,26 +208,24 @@ class _ChatPageState extends State<ChatPage> {
                           : widget.friendUsername;
 
                       final createdAt = DateTime.parse(msg['created_at']);
-                      final formattedDate = DateFormat(
+                      final formatted = DateFormat(
                         'dd/MM HH:mm',
                       ).format(createdAt);
 
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisAlignment: isMe
                               ? MainAxisAlignment.end
                               : MainAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             if (!isMe)
                               CircleAvatar(
                                 radius: 18,
                                 backgroundImage: avatar != null
                                     ? NetworkImage(avatar!)
-                                    : const NetworkImage(
-                                        "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-                                      ),
+                                    : null,
                               ),
                             if (!isMe) const SizedBox(width: 6),
 
@@ -225,25 +236,24 @@ class _ChatPageState extends State<ChatPage> {
                                     : CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    username ?? "Unknown",
+                                    username ?? "",
                                     style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
                                       fontSize: 12,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
 
-                                  // ----- TEXT MESSAGE -----
                                   if (msg["content"] != null)
                                     Container(
+                                      padding: const EdgeInsets.all(12),
                                       margin: const EdgeInsets.only(
                                         top: 4,
                                         bottom: 3,
                                       ),
-                                      padding: const EdgeInsets.all(12),
                                       decoration: BoxDecoration(
                                         color: isMe
-                                            ? Colors.blue
-                                            : Colors.grey[300],
+                                            ? const Color.fromARGB(255, 0, 0, 0)
+                                            : Colors.grey.shade300,
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Text(
@@ -256,7 +266,6 @@ class _ChatPageState extends State<ChatPage> {
                                       ),
                                     ),
 
-                                  // ----- IMAGE MESSAGE -----
                                   if (msg["image_url"] != null)
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(12),
@@ -267,12 +276,27 @@ class _ChatPageState extends State<ChatPage> {
                                       ),
                                     ),
 
-                                  Text(
-                                    formattedDate,
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.grey,
-                                    ),
+                                  // 🔥 SEEN SUR TOUS LES MESSAGES
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        formatted,
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+
+                                      Icon(
+                                        Icons.done_all,
+                                        size: 16,
+                                        color: msg['seen'] == true
+                                            ? Colors.blue
+                                            : Colors.grey,
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -284,9 +308,7 @@ class _ChatPageState extends State<ChatPage> {
                                 radius: 18,
                                 backgroundImage: avatar != null
                                     ? NetworkImage(avatar!)
-                                    : const NetworkImage(
-                                        "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-                                      ),
+                                    : null,
                               ),
                           ],
                         ),
@@ -295,7 +317,6 @@ class _ChatPageState extends State<ChatPage> {
                   ),
           ),
 
-          // ---------------- PREVIEW IMAGE ----------------
           if (_selectedImage != null)
             Container(
               padding: const EdgeInsets.all(10),
@@ -311,20 +332,15 @@ class _ChatPageState extends State<ChatPage> {
                       fit: BoxFit.cover,
                     ),
                   ),
-                  const SizedBox(width: 10),
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.red),
-                    onPressed: () {
-                      setState(() {
-                        _selectedImage = null;
-                      });
-                    },
+                    onPressed: () => setState(() => _selectedImage = null),
                   ),
                 ],
               ),
             ),
 
-          // ---------------- INPUT BAR ----------------
+          // Barre d’envoi
           Container(
             padding: const EdgeInsets.all(8),
             child: Row(
@@ -338,7 +354,7 @@ class _ChatPageState extends State<ChatPage> {
                   child: TextField(
                     controller: _controller,
                     decoration: const InputDecoration(
-                      hintText: "Message...",
+                      hintText: "Message…",
                       border: OutlineInputBorder(),
                     ),
                   ),
