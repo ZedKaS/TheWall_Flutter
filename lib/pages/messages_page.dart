@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'home_page.dart';
 import 'profile_page.dart';
 import 'add_friends_page.dart';
+import 'chat_page.dart';
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
@@ -44,16 +45,19 @@ class _MessagesPageState extends State<MessagesPage> {
         ''')
           .or('user_id.eq.${user.id}, friend_id.eq.${user.id}');
 
-      final List<Map<String, dynamic>> result =
-      List<Map<String, dynamic>>.from(response);
+      final List<Map<String, dynamic>> result = List<Map<String, dynamic>>.from(
+        response,
+      );
 
       final List<Map<String, dynamic>> finalList = [];
 
       for (var row in result) {
         final bool iAmUser = row['user_id'] == user.id;
         final friendData = iAmUser ? row['me'] : row['friend'];
+
         if (friendData != null) {
           finalList.add({
+            'id': iAmUser ? row['friend_id'] : row['user_id'], // 🔥 ID de l'ami
             'username': friendData['username'],
             'avatar_url': friendData['avatar_url'],
             'created_at': row['created_at'],
@@ -74,13 +78,22 @@ class _MessagesPageState extends State<MessagesPage> {
 
   void _onNavTap(BuildContext context, int index) {
     if (index == 0) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomePage()),
+      );
     } else if (index == 1) {
       // already on messages
     } else if (index == 2) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ProfilePage()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const ProfilePage()),
+      );
     } else if (index == 3) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AddFriendsPage()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const AddFriendsPage()),
+      );
     }
   }
 
@@ -91,13 +104,18 @@ class _MessagesPageState extends State<MessagesPage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         centerTitle: true,
-        title: const Text("Messages", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Messages",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _friendsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: Colors.black));
+            return const Center(
+              child: CircularProgressIndicator(color: Colors.black),
+            );
           }
 
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
@@ -111,16 +129,21 @@ class _MessagesPageState extends State<MessagesPage> {
             itemCount: friends.length,
             itemBuilder: (context, index) {
               final friend = friends[index];
+              final friendId = friend['id'];
               final username = friend['username'] ?? "Unknown";
               final avatarPath = friend['avatar_url'];
 
               final avatarUrl = (avatarPath != null && avatarPath.isNotEmpty)
-                  ? supabase.storage.from('profile-pictures').getPublicUrl(avatarPath)
+                  ? supabase.storage
+                        .from('profile-pictures')
+                        .getPublicUrl(avatarPath)
                   : null;
 
               return Card(
                 margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 elevation: 3,
                 child: ListTile(
                   leading: CircleAvatar(
@@ -128,12 +151,28 @@ class _MessagesPageState extends State<MessagesPage> {
                     backgroundImage: avatarUrl != null
                         ? NetworkImage(avatarUrl)
                         : const NetworkImage(
-                      "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-                    ),
+                            "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+                          ),
                   ),
-                  title: Text(username, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  title: Text(
+                    username,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   subtitle: Text("Friends since: ${friend['created_at']}"),
-                  onTap: () {},
+
+                  // 🔥 NAVIGATION VERS CHATPAGE
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChatPage(
+                          friendId: friendId,
+                          friendUsername: username,
+                          friendAvatarUrl: avatarUrl,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               );
             },
@@ -151,7 +190,10 @@ class _MessagesPageState extends State<MessagesPage> {
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_add), label: 'Add Friends'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_add),
+            label: 'Add Friends',
+          ),
         ],
       ),
     );

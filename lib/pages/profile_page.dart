@@ -40,10 +40,10 @@ class _ProfilePageState extends State<ProfilePage> {
         .stream(primaryKey: ['id'])
         .eq('id', currentUserId)
         .listen((profiles) {
-      setState(() {
-        userProfile = profiles.first;
-      });
-    });
+          setState(() {
+            userProfile = profiles.first;
+          });
+        });
 
     _pubSub = supabase
         .from('publications')
@@ -51,18 +51,18 @@ class _ProfilePageState extends State<ProfilePage> {
         .eq('profile_id', currentUserId)
         .order('created_at', ascending: false)
         .listen((pubs) async {
-      for (var p in pubs) {
-        final owner = await supabase
-            .from('profiles')
-            .select()
-            .eq('id', p['profile_id'])
-            .single();
-        p['owner'] = owner;
-      }
-      setState(() {
-        userPublications = pubs;
-      });
-    });
+          for (var p in pubs) {
+            final owner = await supabase
+                .from('profiles')
+                .select()
+                .eq('id', p['profile_id'])
+                .single();
+            p['owner'] = owner;
+          }
+          setState(() {
+            userPublications = pubs;
+          });
+        });
 
     _fetchFriendsCount();
   }
@@ -101,13 +101,22 @@ class _ProfilePageState extends State<ProfilePage> {
 
   void _onNavTap(int index) {
     if (index == 0) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomePage()),
+      );
     } else if (index == 1) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MessagesPage()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MessagesPage()),
+      );
     } else if (index == 2) {
       return;
     } else if (index == 3) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AddFriendsPage()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const AddFriendsPage()),
+      );
     }
   }
 
@@ -122,7 +131,9 @@ class _ProfilePageState extends State<ProfilePage> {
     final isOnline = userProfile!['online'] ?? false;
 
     final avatarUrl = userProfile!['avatar_url'] != null
-        ? supabase.storage.from('profile-pictures').getPublicUrl(userProfile!['avatar_url'])
+        ? supabase.storage
+              .from('profile-pictures')
+              .getPublicUrl(userProfile!['avatar_url'])
         : null;
 
     return Scaffold(
@@ -130,7 +141,10 @@ class _ProfilePageState extends State<ProfilePage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         centerTitle: true,
-        title: const Text("Profile", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Profile",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
@@ -150,15 +164,33 @@ class _ProfilePageState extends State<ProfilePage> {
                 CircleAvatar(
                   radius: 50,
                   backgroundColor: Colors.grey[300],
-                  backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                  child: avatarUrl == null ? const Icon(Icons.person, size: 50, color: Colors.white) : null,
+                  backgroundImage: avatarUrl != null
+                      ? NetworkImage(avatarUrl)
+                      : null,
+                  child: avatarUrl == null
+                      ? const Icon(Icons.person, size: 50, color: Colors.white)
+                      : null,
                 ),
-                const SizedBox(width: 32), // Décalage de 4 espaces pour le compteur
+                const SizedBox(
+                  width: 32,
+                ), // Décalage de 4 espaces pour le compteur
                 Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text("Amis", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    Text("$friendsCount", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const Text(
+                      "Amis",
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      "$friendsCount",
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -168,7 +200,13 @@ class _ProfilePageState extends State<ProfilePage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text("@${userProfile!['username']}", style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+                Text(
+                  "@${userProfile!['username']}",
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(width: 10),
                 Container(
                   width: 12,
@@ -184,9 +222,18 @@ class _ProfilePageState extends State<ProfilePage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Prénom : ${userProfile!['prenom'] ?? ''}", style: const TextStyle(fontSize: 18)),
-                Text("Nom : ${userProfile!['nom'] ?? ''}", style: const TextStyle(fontSize: 18)),
-                Text("Email : ${userProfile!['email'] ?? ''}", style: const TextStyle(fontSize: 18)),
+                Text(
+                  "Prénom : ${userProfile!['prenom'] ?? ''}",
+                  style: const TextStyle(fontSize: 18),
+                ),
+                Text(
+                  "Nom : ${userProfile!['nom'] ?? ''}",
+                  style: const TextStyle(fontSize: 18),
+                ),
+                Text(
+                  "Email : ${userProfile!['email'] ?? ''}",
+                  style: const TextStyle(fontSize: 18),
+                ),
                 Text(
                   "Date de création : ${userProfile!['created'] != null ? DateTime.parse(userProfile!['created']).toLocal().toString().split('.')[0] : ''}",
                   style: const TextStyle(fontSize: 18),
@@ -194,7 +241,10 @@ class _ProfilePageState extends State<ProfilePage> {
               ],
             ),
             const SizedBox(height: 30),
-            const Text("Mes publications", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const Text(
+              "Mes publications",
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 10),
             if (userPublications.isEmpty)
               const Text("Aucune publication pour le moment."),
@@ -228,23 +278,41 @@ class _ProfilePageState extends State<ProfilePage> {
                               ),
                             ),
                             const SizedBox(width: 10),
-                            Text("@${owner['username']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            Text(
+                              "@${owner['username']}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
                             const Spacer(),
-                            Text(relativeTime(DateTime.parse(pub['created_at'])), style: const TextStyle(fontSize: 12)),
+                            Text(
+                              relativeTime(DateTime.parse(pub['created_at'])),
+                              style: const TextStyle(fontSize: 12),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 10),
                         Text(pub['content'] ?? ''),
                         if (pub['image'] != null) ...[
                           const SizedBox(height: 10),
-                          ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.network(pub['image'])),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.network(pub['image']),
+                          ),
                         ],
                         const SizedBox(height: 10),
                         Row(
                           children: [
-                            const Icon(Icons.favorite_border, color: Colors.black),
+                            const Icon(
+                              Icons.favorite_border,
+                              color: Colors.black,
+                            ),
                             const SizedBox(width: 5),
-                            Text("${pub['likes'] ?? 0}", style: const TextStyle(color: Colors.black)),
+                            Text(
+                              "${pub['likes'] ?? 0}",
+                              style: const TextStyle(color: Colors.black),
+                            ),
                           ],
                         ),
                       ],
@@ -267,7 +335,10 @@ class _ProfilePageState extends State<ProfilePage> {
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),
           BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_add), label: 'Add Friends'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_add),
+            label: 'Add Friends',
+          ),
         ],
       ),
     );
