@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thewall/components/text_field.dart';
+
 import 'messages_page.dart';
 import 'profile_page.dart';
 import 'add_friends_page.dart';
@@ -32,7 +33,8 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     sessionManager.goOnline();
 
-    _profilesSub = supabase.from('profiles')
+    _profilesSub = supabase
+        .from('profiles')
         .stream(primaryKey: ['id'])
         .listen((profiles) {
       setState(() {
@@ -48,49 +50,56 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  void signOut() async {
+  Future<void> signOut() async {
     await sessionManager.goOffline();
     await supabase.auth.signOut();
     Navigator.popUntil(context, (route) => route.isFirst);
   }
 
-  // ----------------------------------------------------------
-  // FIXED LIKE SYSTEM (uses 'likes' column in publications)
-  // ----------------------------------------------------------
+  // -----------------------------------------------------------------------------
+  // LIKE SYSTEM
+  // -----------------------------------------------------------------------------
   Future<void> likePublication(String pubId, int currentLikes) async {
     await supabase.from('publications').update({
-      'likes': currentLikes + 1
+      'likes': currentLikes + 1,
     }).eq('id', pubId);
   }
 
-  // ----------------------------------------------------------
-  // PICK IMAGE + UPLOAD
-  // ----------------------------------------------------------
+  // -----------------------------------------------------------------------------
+  // PICK + UPLOAD IMAGE (FIXED)
+  // -----------------------------------------------------------------------------
   Future<void> pickImage() async {
     final picker = ImagePicker();
-    final file = await picker.pickImage(source: ImageSource.gallery);
-    if (file == null) return;
+    final picked = await picker.pickImage(source: ImageSource.gallery);
 
-    setState(() {
-      pickedImagePath = file.path;
-    });
+    if (picked == null) return;
 
-    final fileExt = file.path.split('.').last;
-    final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+    final ext = picked.path.split('.').last;
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.$ext';
 
     try {
-      await supabase.storage
+      // Read file bytes (supports mobile + web)
+      final bytes = await picked.readAsBytes();
+
+      // Upload using bytes (WORKS ON WEB)
+      final response = await supabase.storage
           .from('post-pic')
-          .upload(fileName, File(file.path));
+          .uploadBinary(fileName, bytes);
+
+      print("UPLOAD RESPONSE: $response");
 
       final url = supabase.storage
           .from('post-pic')
           .getPublicUrl(fileName);
 
+      print("PUBLIC URL = $url");
+
       setState(() {
         uploadedImageUrl = url;
+        pickedImagePath = picked.path; // just for checkmark UI
       });
     } catch (e) {
+      print("UPLOAD ERROR: $e");
       setState(() {
         pickedImagePath = null;
         uploadedImageUrl = null;
@@ -98,9 +107,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // ----------------------------------------------------------
+
+  // -----------------------------------------------------------------------------
   // POST PUBLICATION
-  // ----------------------------------------------------------
+  // -----------------------------------------------------------------------------
   Future<void> postPublication() async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
@@ -111,6 +121,7 @@ class _HomePageState extends State<HomePage> {
       'profile_id': user.id,
       'content': textController.text.isEmpty ? null : textController.text,
       'image': uploadedImageUrl,
+      'likes': 0,
     });
 
     setState(() {
@@ -120,17 +131,17 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // ----------------------------------------------------------
-  // DELETE PUBLICATION
-  // ----------------------------------------------------------
+  // -----------------------------------------------------------------------------
+  // DELETE PUBLICATION (FIXED: removes correct file)
+  // -----------------------------------------------------------------------------
   Future<void> deletePublication(String id, String? imageUrl) async {
     if (imageUrl != null && imageUrl.isNotEmpty) {
-      final idx = imageUrl.indexOf('/post-pic/');
-      if (idx != -1) {
-        final fileName = imageUrl.substring(idx + '/post-pic/'.length);
-        try {
-          await supabase.storage.from('post-pic').remove([fileName]);
-        } catch (_) {}
+      try {
+        final fileName = Uri.parse(imageUrl).pathSegments.last;
+
+        await supabase.storage.from('post-pic').remove([fileName]);
+      } catch (e) {
+        print("DELETE ERROR: $e");
       }
     }
 
@@ -150,14 +161,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  bool _toBool(dynamic v) {
-    if (v == null) return false;
-    if (v is bool) return v;
-    if (v is int) return v == 1;
-    if (v is String) return v.toLowerCase() == 'true' || v == '1' || v == 't';
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -168,14 +171,12 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: Colors.grey[900],
         actions: [
           IconButton(
-              onPressed: signOut,
-              icon: const Icon(Icons.logout, color: Colors.white)),
+            onPressed: signOut,
+            icon: const Icon(Icons.logout, color: Colors.white),
+          ),
         ],
       ),
 
-      // ----------------------------------------------------------------------
-      // MAIN BODY
-      // ----------------------------------------------------------------------
       body: Column(
         children: [
           Expanded(
@@ -202,32 +203,26 @@ class _HomePageState extends State<HomePage> {
                     final profile = profilesMap[profileId];
 
                     final username = profile?['username'] ?? 'Unknown';
-                    final authorOnline = _toBool(profile?['online']);
+                    final avatarFile = profile?['avatar_url'];
 
-                    final avatarUrl = profile?['avatar_url'] != null
+                    final avatarUrl = avatarFile != null
                         ? supabase.storage
                         .from('profile-pictures')
-                        .getPublicUrl(profile['avatar_url'])
+                        .getPublicUrl(avatarFile)
                         : null;
 
-                    final createdAt = pub['created_at'];
-                    String createdAtText = '';
-                    if (createdAt != null) {
-                      final date =
-                      DateTime.parse(createdAt.toString()).toLocal();
-                      createdAtText =
-                      "${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
-                    }
+                    final createdAt = pub['created_at'] != null
+                        ? DateTime.parse(pub['created_at']).toLocal()
+                        : null;
 
-                    final currentUser = supabase.auth.currentUser;
                     final isMyPost =
-                        currentUser != null && currentUser.id == profileId;
+                        supabase.auth.currentUser?.id == profileId;
 
                     final likes = pub['likes'] ?? 0;
 
                     return Card(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
+                      margin:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       child: Padding(
                         padding: const EdgeInsets.all(10),
                         child: Column(
@@ -235,8 +230,7 @@ class _HomePageState extends State<HomePage> {
                           children: [
                             // HEADER
                             Row(
-                              mainAxisAlignment:
-                              MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Row(
                                   children: [
@@ -255,24 +249,15 @@ class _HomePageState extends State<HomePage> {
                                     Text(username,
                                         style: const TextStyle(
                                             fontWeight: FontWeight.bold)),
-                                    const SizedBox(width: 5),
-                                    Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        color: authorOnline
-                                            ? Colors.green
-                                            : Colors.red,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
                                   ],
                                 ),
                                 Row(
                                   children: [
-                                    Text(createdAtText,
-                                        style:
-                                        const TextStyle(fontSize: 12)),
+                                    if (createdAt != null)
+                                      Text(
+                                        "${createdAt.day}/${createdAt.month}/${createdAt.year} ${createdAt.hour}:${createdAt.minute.toString().padLeft(2, '0')}",
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
                                     if (isMyPost)
                                       IconButton(
                                         icon: const Icon(Icons.delete,
@@ -285,29 +270,29 @@ class _HomePageState extends State<HomePage> {
                               ],
                             ),
 
-                            // TEXT CONTENT
                             if (pub['content'] != null) ...[
                               const SizedBox(height: 5),
                               Text(pub['content']),
                             ],
 
-                            // IMAGE CONTENT
                             if (pub['image'] != null) ...[
-                              const SizedBox(height: 5),
-                              Image.network(pub['image']),
+                              const SizedBox(height: 10),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: Image.network(pub['image']),
+                              ),
                             ],
 
-                            // LIKES
                             Row(
                               children: [
-                                Text('Likes: $likes'),
+                                Text("Likes: $likes"),
                                 IconButton(
                                   icon: const Icon(Icons.thumb_up),
-                                  onPressed: () => likePublication(
-                                      pub['id'], likes),
+                                  onPressed: () =>
+                                      likePublication(pub['id'], likes),
                                 ),
                               ],
-                            ),
+                            )
                           ],
                         ),
                       ),
@@ -318,50 +303,48 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // ----------------------------------------------------------------------
           // POST BOX
-          // ----------------------------------------------------------------------
           Padding(
-            padding: const EdgeInsets.all(15.0),
+            padding: const EdgeInsets.all(15),
             child: Column(
               children: [
                 MyTextField(
-                    controller: textController,
-                    hintText: "Write something...",
-                    obscureText: false),
+                  controller: textController,
+                  hintText: "Write something...",
+                  obscureText: false,
+                ),
                 const SizedBox(height: 10),
 
                 Row(
                   children: [
                     ElevatedButton(
-                        onPressed: pickImage,
-                        child: const Text("Pick Image")),
+                        onPressed: pickImage, child: const Text("Pick Image")),
                     const SizedBox(width: 10),
                     if (pickedImagePath != null)
                       const Icon(Icons.check_circle, color: Colors.green),
-                    if (uploadedImageUrl != null) ...[
-                      const SizedBox(width: 10),
+
+                    if (uploadedImageUrl != null)
                       Expanded(
-                          child: Text(uploadedImageUrl!,
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1)),
-                    ]
+                        child: Text(
+                          uploadedImageUrl!,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
                   ],
                 ),
-
                 const SizedBox(height: 10),
+
                 ElevatedButton(
-                    onPressed: postPublication,
-                    child: const Text("Post")),
+                  onPressed: postPublication,
+                  child: const Text("Post"),
+                ),
               ],
             ),
           ),
         ],
       ),
 
-      // ----------------------------------------------------------------------
-      // NAVBAR
-      // ----------------------------------------------------------------------
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 0,
         onTap: _onNavTap,
@@ -377,7 +360,6 @@ class _HomePageState extends State<HomePage> {
         ],
         selectedItemColor: Colors.blue,
         unselectedItemColor: Color.fromARGB(255, 73, 73, 73),
-        backgroundColor: Colors.white,
         type: BottomNavigationBarType.fixed,
       ),
     );
