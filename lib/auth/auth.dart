@@ -27,12 +27,18 @@ class _AuthPageState extends State<AuthPage> {
         builder: (context, snapshot) {
           final session = Supabase.instance.client.auth.currentSession;
 
-          // user is logged in
           if (session != null) {
-            return const HomePage();
+            // 🔥 FORCE REFRESH DE LA PAGE APRÈS CONNEXION
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => const HomePage()),
+              );
+            });
+
+            return const SizedBox(); // écran vide pendant 1 frame
           }
 
-          // user is NOT logged in
           return const LoginOrRegister();
         },
       ),
