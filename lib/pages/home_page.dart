@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../components/text_field.dart';
 
+import '../components/text_field.dart';
 import 'messages_page.dart';
 import 'profile_page.dart';
 import 'add_friends_page.dart';
@@ -28,6 +28,12 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic> profilesMap = {};
   late StreamSubscription<List<Map<String, dynamic>>> _profilesSub;
 
+  // Comment visibility per post
+  Map<String, bool> showComments = {};
+
+  // Controllers per post
+  Map<String, TextEditingController> commentControllers = {};
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +53,9 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     textController.dispose();
     _profilesSub.cancel();
+    for (var c in commentControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -86,6 +95,33 @@ class _HomePageState extends State<HomePage> {
   Future<void> unlikePost(String postId) async {
     final uid = supabase.auth.currentUser!.id;
     await supabase.from('post_likes').delete().eq('user_id', uid).eq('post_id', postId);
+  }
+
+  // -------------------------------------------------------------------------
+  // COMMENTS SYSTEM
+  // -------------------------------------------------------------------------
+
+  Future<void> addComment(String postId, String comment) async {
+    final uid = supabase.auth.currentUser!.id;
+    if (comment.trim().isEmpty) return;
+
+    await supabase.from('comments').insert({
+      'post_id': postId,
+      'user_id': uid,
+      'content': comment,
+    });
+  }
+
+  Future<void> deleteComment(String commentId) async {
+    await supabase.from('comments').delete().eq('id', commentId);
+  }
+
+  Stream<List<Map<String, dynamic>>> commentStream(String postId) {
+    return supabase
+        .from('comments')
+        .stream(primaryKey: ['id'])
+        .eq('post_id', postId)
+        .order('created_at');
   }
 
   // -------------------------------------------------------------------------
@@ -138,7 +174,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   // -------------------------------------------------------------------------
-  // DELETE PUBLICATION (with confirmation)
+  // DELETE PUBLICATION
   // -------------------------------------------------------------------------
   Future<void> deletePublication(String id, String? imageUrl) async {
     final confirm = await showDialog<bool>(
@@ -155,7 +191,6 @@ class _HomePageState extends State<HomePage> {
 
     if (confirm != true) return;
 
-    // Delete image from storage
     if (imageUrl != null && imageUrl.isNotEmpty) {
       try {
         final fileName = Uri.parse(imageUrl).pathSegments.last;
@@ -165,10 +200,7 @@ class _HomePageState extends State<HomePage> {
       }
     }
 
-    // Delete publication (likes will be deleted automatically if ON DELETE CASCADE)
     await supabase.from('publications').delete().eq('id', id);
-
-    // Refresh UI
     setState(() {});
   }
 
@@ -183,7 +215,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   // -------------------------------------------------------------------------
-  // BUILD
+  // BUILD UI
   // -------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
@@ -219,6 +251,15 @@ class _HomePageState extends State<HomePage> {
                     final avatarFile = profile?['avatar_url'];
                     final avatarUrl = avatarFile != null ? supabase.storage.from('profile-pictures').getPublicUrl(avatarFile) : null;
                     final isMyPost = supabase.auth.currentUser?.id == pub['profile_id'];
+
+                    // Controller for this post
+                    final commentController = commentControllers.putIfAbsent(
+                      pub['id'],
+                          () => TextEditingController(),
+                    );
+
+                    // Comment visibility
+                    final isVisible = showComments[pub['id']] ?? false;
 
                     return FutureBuilder(
                       future: Future.wait([hasLiked(pub['id']), getLikeCount(pub['id'])]),
@@ -269,7 +310,7 @@ class _HomePageState extends State<HomePage> {
                                   ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(pub['image'])),
                                 ],
 
-                                // LIKE ROW
+                                // LIKE + COMMENT BUTTONS
                                 Row(
                                   children: [
                                     Text("$likeCount likes"),
@@ -284,8 +325,82 @@ class _HomePageState extends State<HomePage> {
                                         setState(() {});
                                       },
                                     ),
+                                    const SizedBox(width: 10),
+                                    StreamBuilder<List<Map<String, dynamic>>>(
+                                      stream: commentStream(pub['id']),
+                                      builder: (context, csnap) {
+                                        int commentCount = 0;
+                                        if (csnap.hasData) {
+                                          commentCount = csnap.data!.length;
+                                        }
+                                        return Row(
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(Icons.comment, color: Colors.grey),
+                                              onPressed: () {
+                                                setState(() {
+                                                  showComments[pub['id']] = !(showComments[pub['id']] ?? false);
+                                                });
+                                              },
+                                            ),
+                                            if (commentCount > 0)
+                                              Text(commentCount <= 3 ? "$commentCount" : "+$commentCount"),
+                                          ],
+                                        );
+                                      },
+                                    ),
                                   ],
-                                )
+                                ),
+
+                                // COMMENTS SECTION
+                                if (isVisible)
+                                  StreamBuilder<List<Map<String, dynamic>>>(
+                                    stream: commentStream(pub['id']),
+                                    builder: (context, csnap) {
+                                      if (!csnap.hasData) return const SizedBox();
+                                      final comments = csnap.data!;
+                                      return Column(
+                                        children: [
+                                          for (final c in comments)
+                                            ListTile(
+                                              contentPadding: EdgeInsets.zero,
+                                              title: Text(profilesMap[c['user_id']]?['username'] ?? "User"),
+                                              subtitle: Text(c['content']),
+                                              trailing: c['user_id'] == supabase.auth.currentUser?.id
+                                                  ? IconButton(
+                                                icon: const Icon(Icons.delete, color: Colors.red),
+                                                onPressed: () => deleteComment(c['id']),
+                                              )
+                                                  : null,
+                                            ),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: TextField(
+                                                  controller: commentController,
+                                                  decoration: const InputDecoration(
+                                                    hintText: "Write a comment...",
+                                                    border: InputBorder.none,
+                                                  ),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.send),
+                                                onPressed: () async {
+                                                  final text = commentController.text.trim();
+                                                  if (text.isNotEmpty) {
+                                                    await addComment(pub['id'], text);
+                                                    commentController.clear();
+                                                    setState(() {});
+                                                  }
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
                               ],
                             ),
                           ),
@@ -298,10 +413,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // ---------------------------------------------------------------------
-          // POST BOX (modified visuals)
-          // ---------------------------------------------------------------------
-          // POST BOX (modified for web)
+          // POST BOX
           Padding(
             padding: const EdgeInsets.all(15),
             child: Column(
@@ -345,10 +457,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 10),
-
-                // IMAGE PREVIEW IF SELECTED
                 if (uploadedImageUrl != null)
                   Stack(
                     children: [
@@ -382,9 +491,7 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ],
                   ),
-
                 const SizedBox(height: 10),
-
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -403,9 +510,9 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-
         ],
       ),
+
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 0,
         onTap: _onNavTap,
