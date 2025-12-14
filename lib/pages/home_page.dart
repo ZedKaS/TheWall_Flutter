@@ -204,6 +204,13 @@ class _HomePageState extends State<HomePage> {
     setState(() {});
   }
 
+  // -------------------------------------------------------------------------
+  // UTIL - STATUT EN LIGNE
+  // -------------------------------------------------------------------------
+  Color onlineColor(bool? online) {
+    return (online ?? false) ? Colors.green : Colors.red;
+  }
+
   void _onNavTap(int index) {
     if (index == 1) {
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MessagesPage()));
@@ -252,13 +259,7 @@ class _HomePageState extends State<HomePage> {
                     final avatarUrl = avatarFile != null ? supabase.storage.from('profile-pictures').getPublicUrl(avatarFile) : null;
                     final isMyPost = supabase.auth.currentUser?.id == pub['profile_id'];
 
-                    // Controller for this post
-                    final commentController = commentControllers.putIfAbsent(
-                      pub['id'],
-                          () => TextEditingController(),
-                    );
-
-                    // Comment visibility
+                    final commentController = commentControllers.putIfAbsent(pub['id'], () => TextEditingController());
                     final isVisible = showComments[pub['id']] ?? false;
 
                     return FutureBuilder(
@@ -276,7 +277,7 @@ class _HomePageState extends State<HomePage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // HEADER
+                                // HEADER POST AVEC BULLE STATUT
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
@@ -290,6 +291,15 @@ class _HomePageState extends State<HomePage> {
                                         ),
                                         const SizedBox(width: 8),
                                         Text(username, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: onlineColor(profile?['online']),
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     if (isMyPost)
@@ -330,9 +340,7 @@ class _HomePageState extends State<HomePage> {
                                       stream: commentStream(pub['id']),
                                       builder: (context, csnap) {
                                         int commentCount = 0;
-                                        if (csnap.hasData) {
-                                          commentCount = csnap.data!.length;
-                                        }
+                                        if (csnap.hasData) commentCount = csnap.data!.length;
                                         return Row(
                                           children: [
                                             IconButton(
@@ -352,7 +360,7 @@ class _HomePageState extends State<HomePage> {
                                   ],
                                 ),
 
-                                // COMMENTS SECTION
+                                // COMMENTS SECTION AVEC PHOTO + BULLE STATUT
                                 if (isVisible)
                                   StreamBuilder<List<Map<String, dynamic>>>(
                                     stream: commentStream(pub['id']),
@@ -364,7 +372,37 @@ class _HomePageState extends State<HomePage> {
                                           for (final c in comments)
                                             ListTile(
                                               contentPadding: EdgeInsets.zero,
-                                              title: Text(profilesMap[c['user_id']]?['username'] ?? "User"),
+                                              leading: CircleAvatar(
+                                                radius: 12,
+                                                backgroundImage: profilesMap[c['user_id']]?['avatar_url'] != null
+                                                    ? NetworkImage(
+                                                  supabase.storage
+                                                      .from('profile-pictures')
+                                                      .getPublicUrl(profilesMap[c['user_id']]?['avatar_url']),
+                                                )
+                                                    : null,
+                                                backgroundColor: Colors.grey[300],
+                                                child: profilesMap[c['user_id']]?['avatar_url'] == null
+                                                    ? const Icon(Icons.person, size: 12)
+                                                    : null,
+                                              ),
+                                              title: Row(
+                                                children: [
+                                                  Text(
+                                                    profilesMap[c['user_id']]?['username'] ?? "User",
+                                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Container(
+                                                    width: 8,
+                                                    height: 8,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: onlineColor(profilesMap[c['user_id']]?['online']),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                               subtitle: Text(c['content']),
                                               trailing: c['user_id'] == supabase.auth.currentUser?.id
                                                   ? IconButton(
@@ -414,12 +452,30 @@ class _HomePageState extends State<HomePage> {
           ),
 
           // POST BOX
-          Padding(
-            padding: const EdgeInsets.all(15),
-            child: Column(
-              children: [
-                Row(
+          // Remplace le bloc "POST BOX" dans ton Column par ce bloc
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: SafeArea(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+                color: Colors.grey[300],
+                child: Row(
                   children: [
+                    // Icone image à gauche
+                    GestureDetector(
+                      onTap: pickImage,
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[900],
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.image, color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
+                    // TextField
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 15),
@@ -444,70 +500,22 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     const SizedBox(width: 10),
+
+                    // Icone send à droite
                     GestureDetector(
-                      onTap: pickImage,
+                      onTap: postPublication,
                       child: Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: Colors.grey[900],
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.image, color: Colors.white),
+                        child: const Icon(Icons.send, color: Colors.white),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                if (uploadedImageUrl != null)
-                  Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          uploadedImageUrl!,
-                          height: 120,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      Positioned(
-                        top: 5,
-                        right: 5,
-                        child: GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              pickedImagePath = null;
-                              uploadedImageUrl = null;
-                            });
-                          },
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.black54,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.close, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: postPublication,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-                      backgroundColor: Colors.grey[900],
-                    ),
-                    child: const Text(
-                      "Post",
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
