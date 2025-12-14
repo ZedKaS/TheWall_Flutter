@@ -8,13 +8,13 @@ class LoginPage extends StatefulWidget {
   const LoginPage({super.key, required this.onTap});
 
   @override
-  State<LoginPage> createState() => _LoginState();
+  State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginState extends State<LoginPage> {
-  final supabase = Supabase.instance.client;
-  final emailController = TextEditingController();
-  final passwordController = TextEditingController();
+class _LoginPageState extends State<LoginPage> {
+  final SupabaseClient supabase = Supabase.instance.client;
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
 
   void signIn() async {
     showDialog(
@@ -24,7 +24,6 @@ class _LoginState extends State<LoginPage> {
     );
 
     try {
-      // Login sans vérification email
       final AuthResponse response = await supabase.auth.signInWithPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
@@ -57,39 +56,114 @@ class _LoginState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[300],
+      backgroundColor: Colors.white, // <-- fond blanc
       body: SafeArea(
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 25.0),
+          child: SingleChildScrollView(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox(height: 50),
-                const Icon(Icons.lock, size: 100),
-                const SizedBox(height: 20),
-                const Text("Welcome back, you've been missed"),
-                const SizedBox(height: 25),
-
-                MyTextField(controller: emailController, hintText: 'Email', obscureText: false),
+                // --- LOGO AU-DESSUS DU LOGIN ---
+                SizedBox(
+                  width: 250,
+                  height: 150,
+                  child: Image.asset(
+                    'lib/assets/sigmawall.png',
+                    fit: BoxFit.contain,
+                  ),
+                ),
                 const SizedBox(height: 15),
-                MyTextField(controller: passwordController, hintText: 'Password', obscureText: true),
-                const SizedBox(height: 25),
 
-                MyButton(onTap: signIn, text: 'Sign In'),
+                // --- Champ Email arrondi ---
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(
+                      controller: emailController,
+                      hintText: 'Email',
+                      obscureText: false,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // --- Champ Password arrondi ---
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(
+                      controller: passwordController,
+                      hintText: 'Password',
+                      obscureText: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
+
+                // --- Bouton Sign In ---
+                SizedBox(
+                  width: 200,
+                  height: 50,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: MyButton(
+                      onTap: signIn,
+                      text: '', // on laisse vide car on met une icône
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.login, color: Colors.black), // icône connexion
+                          SizedBox(width: 8),
+                          Text(
+                            'Sign In',
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+
+                // --- Forgot Password ---
+                TextButton(
+                  onPressed: () {},
+                  child: const Text(
+                    'Forgot Password?',
+                    style: TextStyle(color: Colors.black),
+                  ),
+                ),
+
+                // --- Lien Register ---
                 const SizedBox(height: 20),
-
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('Not a member?', style: TextStyle(color: Colors.grey[700])),
+                    Text(
+                      'Not a member?',
+                      style: TextStyle(color: Colors.black.withOpacity(0.6)),
+                    ),
                     const SizedBox(width: 6),
                     GestureDetector(
                       onTap: widget.onTap,
-                      child: const Text('Register now', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                      child: const Text(
+                        'Register now',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF4BA3FF),
+                        ),
+                      ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 20),
               ],
             ),
           ),

@@ -1,11 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:thewall/components/text_field.dart';
 
+import '../components/text_field.dart';
 import 'messages_page.dart';
 import 'profile_page.dart';
-import 'add_friends_page.dart'; // Importer la page AddFriendsPage
+import 'add_friends_page.dart';
 import '../session_manager.dart';
 
 class HomePage extends StatefulWidget {
@@ -19,10 +21,18 @@ class _HomePageState extends State<HomePage> {
   final supabase = Supabase.instance.client;
   final sessionManager = SessionManager();
   final textController = TextEditingController();
-  final imageController = TextEditingController();
+
+  String? pickedImagePath;
+  String? uploadedImageUrl;
 
   Map<String, dynamic> profilesMap = {};
   late StreamSubscription<List<Map<String, dynamic>>> _profilesSub;
+
+  // Comment visibility per post
+  Map<String, bool> showComments = {};
+
+  // Controllers per post
+  Map<String, TextEditingController> commentControllers = {};
 
   @override
   void initState() {
@@ -33,7 +43,7 @@ class _HomePageState extends State<HomePage> {
       profiles,
     ) {
       setState(() {
-        profilesMap = {for (var p in profiles) p['id'].toString(): p};
+        profilesMap = {for (var p in profiles) p['id']: p};
       });
     });
   }
@@ -41,61 +51,179 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     textController.dispose();
-    imageController.dispose();
     _profilesSub.cancel();
+    for (var c in commentControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  void signOut() async {
+  Future<void> signOut() async {
     await sessionManager.goOffline();
     await supabase.auth.signOut();
     Navigator.popUntil(context, (route) => route.isFirst);
   }
 
-  Future<void> likePublication(String pubId) async {
-    final user = supabase.auth.currentUser;
-    if (user == null) return;
+  // -------------------------------------------------------------------------
+  // LIKE SYSTEM
+  // -------------------------------------------------------------------------
 
-    final profileId = user.id;
-
-    final alreadyLiked = await supabase
-        .from('publication_likes')
+  Future<bool> hasLiked(String postId) async {
+    final uid = supabase.auth.currentUser!.id;
+    final res = await supabase
+        .from('post_likes')
         .select()
-        .eq('publication_id', pubId)
-        .eq('profile_id', profileId)
-        .maybeSingle();
-
-    if (alreadyLiked != null) return;
-
-    await supabase.from('publication_likes').insert({
-      'publication_id': pubId,
-      'profile_id': profileId,
-    });
-
-    await supabase.rpc('update_publication_likes', params: {'pub_id': pubId});
+        .eq('user_id', uid)
+        .eq('post_id', postId);
+    return res.isNotEmpty;
   }
 
+  Future<int> getLikeCount(String postId) async {
+    final res = await supabase
+        .from('post_likes')
+        .select('id')
+        .eq('post_id', postId);
+    return res.length;
+  }
+
+  Future<void> likePost(String postId) async {
+    final uid = supabase.auth.currentUser!.id;
+    await supabase.from('post_likes').insert({
+      'user_id': uid,
+      'post_id': postId,
+    });
+  }
+
+  Future<void> unlikePost(String postId) async {
+    final uid = supabase.auth.currentUser!.id;
+    await supabase
+        .from('post_likes')
+        .delete()
+        .eq('user_id', uid)
+        .eq('post_id', postId);
+  }
+
+  // -------------------------------------------------------------------------
+  // COMMENTS SYSTEM
+  // -------------------------------------------------------------------------
+
+  Future<void> addComment(String postId, String comment) async {
+    final uid = supabase.auth.currentUser!.id;
+    if (comment.trim().isEmpty) return;
+
+    await supabase.from('comments').insert({
+      'post_id': postId,
+      'user_id': uid,
+      'content': comment,
+    });
+  }
+
+  Future<void> deleteComment(String commentId) async {
+    await supabase.from('comments').delete().eq('id', commentId);
+  }
+
+  Stream<List<Map<String, dynamic>>> commentStream(String postId) {
+    return supabase
+        .from('comments')
+        .stream(primaryKey: ['id'])
+        .eq('post_id', postId)
+        .order('created_at');
+  }
+
+  // -------------------------------------------------------------------------
+  // PICK + UPLOAD IMAGE
+  // -------------------------------------------------------------------------
+  Future<void> pickImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+
+    final bytes = await picked.readAsBytes();
+    final ext = picked.path.split('.').last;
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+    try {
+      await supabase.storage.from('post-pic').uploadBinary(fileName, bytes);
+      final url = supabase.storage.from('post-pic').getPublicUrl(fileName);
+
+      setState(() {
+        uploadedImageUrl = url;
+        pickedImagePath = picked.path;
+      });
+    } catch (_) {
+      setState(() {
+        pickedImagePath = null;
+        uploadedImageUrl = null;
+      });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // POST PUBLICATION
+  // -------------------------------------------------------------------------
   Future<void> postPublication() async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
+    if (textController.text.isEmpty && uploadedImageUrl == null) return;
 
-    if (textController.text.isNotEmpty || imageController.text.isNotEmpty) {
-      await supabase.from('publications').insert({
-        'profile_id': user.id,
-        'content': textController.text.isEmpty ? null : textController.text,
-        'image': imageController.text.isEmpty ? null : imageController.text,
-      });
-    }
+    await supabase.from('publications').insert({
+      'profile_id': user.id,
+      'content': textController.text.isEmpty ? null : textController.text,
+      'image': uploadedImageUrl,
+    });
 
     setState(() {
       textController.clear();
-      imageController.clear();
+      pickedImagePath = null;
+      uploadedImageUrl = null;
     });
   }
 
-  void _onNavTap(int index) {
-    if (index == 0) return;
+  // -------------------------------------------------------------------------
+  // DELETE PUBLICATION
+  // -------------------------------------------------------------------------
+  Future<void> deletePublication(String id, String? imageUrl) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Delete post?"),
+        content: const Text("This action cannot be undone."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
 
+    if (confirm != true) return;
+
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      try {
+        final fileName = Uri.parse(imageUrl).pathSegments.last;
+        await supabase.storage.from('post-pic').remove([fileName]);
+      } catch (e) {
+        print("Error deleting image: $e");
+      }
+    }
+
+    await supabase.from('publications').delete().eq('id', id);
+    setState(() {});
+  }
+
+  // -------------------------------------------------------------------------
+  // UTIL - STATUT EN LIGNE
+  // -------------------------------------------------------------------------
+  Color onlineColor(bool? online) {
+    return (online ?? false) ? Colors.green : Colors.red;
+  }
+
+  void _onNavTap(int index) {
     if (index == 1) {
       Navigator.pushReplacement(
         context,
@@ -107,7 +235,6 @@ class _HomePageState extends State<HomePage> {
         MaterialPageRoute(builder: (_) => const ProfilePage()),
       );
     } else if (index == 3) {
-      // Navigation vers la page AddFriendsPage
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const AddFriendsPage()),
@@ -115,22 +242,16 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // Helper pour interpréter différents types comme bool
-  bool _toBool(dynamic v) {
-    if (v == null) return false;
-    if (v is bool) return v;
-    if (v is int) return v == 1;
-    if (v is String) return v.toLowerCase() == 'true' || v == '1' || v == 't';
-    return false;
-  }
-
+  // -------------------------------------------------------------------------
+  // BUILD UI
+  // -------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[300],
       appBar: AppBar(
         title: const Center(
-          child: Text("The Wall", style: TextStyle(color: Colors.white)),
+          child: Text("ΣSigma", style: TextStyle(color: Colors.white)),
         ),
         backgroundColor: Colors.grey[900],
         actions: [
@@ -140,7 +261,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-
       body: Column(
         children: [
           Expanded(
@@ -150,173 +270,379 @@ class _HomePageState extends State<HomePage> {
                   .stream(primaryKey: ['id'])
                   .order('created_at', ascending: false),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
+                if (!snapshot.hasData)
                   return const Center(child: CircularProgressIndicator());
-                }
 
                 final publications = snapshot.data!;
-                if (publications.isEmpty) {
+                if (publications.isEmpty)
                   return const Center(child: Text("No publications yet."));
-                }
 
                 return ListView.builder(
                   itemCount: publications.length,
                   itemBuilder: (context, index) {
                     final pub = publications[index];
-
-                    // Récupérer le profil de l'auteur
-                    final profileId = pub['profile_id'].toString();
-                    final profile = profilesMap[profileId];
-
-                    // Username correct
-                    final username = profile != null
-                        ? profile['username'] ?? 'Unknown'
-                        : 'Unknown';
-
-                    // Online de l'auteur
-                    final authorOnline = profile != null
-                        ? _toBool(profile['online'])
-                        : false;
-
-                    // URL de l'avatar
-                    final avatarUrl =
-                        (profile != null && profile['avatar_url'] != null)
+                    final profile = profilesMap[pub['profile_id']];
+                    final username = profile?['username'] ?? 'Unknown';
+                    final avatarFile = profile?['avatar_url'];
+                    final avatarUrl = avatarFile != null
                         ? supabase.storage
                               .from('profile-pictures')
-                              .getPublicUrl(profile['avatar_url'])
+                              .getPublicUrl(avatarFile)
                         : null;
-
-                    // Date de création du post
-                    final createdAt = pub['created_at'];
-                    String createdAtText = '';
-                    if (createdAt != null) {
-                      final date = DateTime.parse(
-                        createdAt.toString(),
-                      ).toLocal();
-                      createdAtText =
-                          "${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
-                    }
-
-                    // Identification du post de l'utilisateur courant
-                    final currentUser = supabase.auth.currentUser;
                     final isMyPost =
-                        currentUser != null && currentUser.id == profileId;
+                        supabase.auth.currentUser?.id == pub['profile_id'];
 
-                    final bool isGreenDot = isMyPost || authorOnline;
+                    final commentController = commentControllers.putIfAbsent(
+                      pub['id'],
+                      () => TextEditingController(),
+                    );
+                    final isVisible = showComments[pub['id']] ?? false;
 
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Header: Avatar + Username + pastille + date
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    return FutureBuilder(
+                      future: Future.wait([
+                        hasLiked(pub['id']),
+                        getLikeCount(pub['id']),
+                      ]),
+                      builder: (context, AsyncSnapshot<List<dynamic>> snap) {
+                        if (!snap.hasData) return const SizedBox();
+
+                        final bool liked = snap.data![0];
+                        final int likeCount = snap.data![1];
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                // HEADER POST AVEC BULLE STATUT
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 15,
+                                          backgroundImage: avatarUrl != null
+                                              ? NetworkImage(avatarUrl)
+                                              : null,
+                                          backgroundColor: Colors.grey[300],
+                                          child: avatarUrl == null
+                                              ? const Icon(
+                                                  Icons.person,
+                                                  size: 15,
+                                                )
+                                              : null,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          username,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: onlineColor(
+                                              profile?['online'],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (isMyPost)
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.delete,
+                                          color: Colors.red,
+                                        ),
+                                        onPressed: () => deletePublication(
+                                          pub['id'],
+                                          pub['image'],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+
+                                if (pub['content'] != null) ...[
+                                  const SizedBox(height: 5),
+                                  Text(pub['content']),
+                                ],
+
+                                if (pub['image'] != null) ...[
+                                  const SizedBox(height: 10),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Image.network(pub['image']),
+                                  ),
+                                ],
+
+                                // LIKE + COMMENT BUTTONS
                                 Row(
                                   children: [
-                                    CircleAvatar(
-                                      radius: 15,
-                                      backgroundColor: Colors.grey[300],
-                                      backgroundImage: avatarUrl != null
-                                          ? NetworkImage(avatarUrl)
-                                          : null,
-                                      child: avatarUrl == null
-                                          ? const Icon(
-                                              Icons.person,
-                                              size: 15,
-                                              color: Colors.white,
-                                            )
-                                          : null,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      username,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
+                                    Text("$likeCount likes"),
+                                    IconButton(
+                                      icon: Icon(
+                                        liked
+                                            ? Icons.favorite
+                                            : Icons.favorite_border,
+                                        color: liked ? Colors.red : Colors.grey,
                                       ),
+                                      onPressed: () async {
+                                        if (liked) {
+                                          await unlikePost(pub['id']);
+                                        } else {
+                                          await likePost(pub['id']);
+                                        }
+                                        setState(() {});
+                                      },
                                     ),
-                                    const SizedBox(width: 5),
-                                    Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: isGreenDot
-                                            ? Colors.green
-                                            : Colors.red,
-                                      ),
+                                    const SizedBox(width: 10),
+                                    StreamBuilder<List<Map<String, dynamic>>>(
+                                      stream: commentStream(pub['id']),
+                                      builder: (context, csnap) {
+                                        int commentCount = 0;
+                                        if (csnap.hasData)
+                                          commentCount = csnap.data!.length;
+                                        return Row(
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.comment,
+                                                color: Colors.grey,
+                                              ),
+                                              onPressed: () {
+                                                setState(() {
+                                                  showComments[pub['id']] =
+                                                      !(showComments[pub['id']] ??
+                                                          false);
+                                                });
+                                              },
+                                            ),
+                                            if (commentCount > 0)
+                                              Text(
+                                                commentCount <= 3
+                                                    ? "$commentCount"
+                                                    : "+$commentCount",
+                                              ),
+                                          ],
+                                        );
+                                      },
                                     ),
                                   ],
                                 ),
-                                Text(
-                                  createdAtText,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
+
+                                // COMMENTS SECTION AVEC PHOTO + BULLE STATUT
+                                if (isVisible)
+                                  StreamBuilder<List<Map<String, dynamic>>>(
+                                    stream: commentStream(pub['id']),
+                                    builder: (context, csnap) {
+                                      if (!csnap.hasData)
+                                        return const SizedBox();
+                                      final comments = csnap.data!;
+                                      return Column(
+                                        children: [
+                                          for (final c in comments)
+                                            ListTile(
+                                              contentPadding: EdgeInsets.zero,
+                                              leading: CircleAvatar(
+                                                radius: 12,
+                                                backgroundImage:
+                                                    profilesMap[c['user_id']]?['avatar_url'] !=
+                                                        null
+                                                    ? NetworkImage(
+                                                        supabase.storage
+                                                            .from(
+                                                              'profile-pictures',
+                                                            )
+                                                            .getPublicUrl(
+                                                              profilesMap[c['user_id']]?['avatar_url'],
+                                                            ),
+                                                      )
+                                                    : null,
+                                                backgroundColor:
+                                                    Colors.grey[300],
+                                                child:
+                                                    profilesMap[c['user_id']]?['avatar_url'] ==
+                                                        null
+                                                    ? const Icon(
+                                                        Icons.person,
+                                                        size: 12,
+                                                      )
+                                                    : null,
+                                              ),
+                                              title: Row(
+                                                children: [
+                                                  Text(
+                                                    profilesMap[c['user_id']]?['username'] ??
+                                                        "User",
+                                                    style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Container(
+                                                    width: 8,
+                                                    height: 8,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: onlineColor(
+                                                        profilesMap[c['user_id']]?['online'],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              subtitle: Text(c['content']),
+                                              trailing:
+                                                  c['user_id'] ==
+                                                      supabase
+                                                          .auth
+                                                          .currentUser
+                                                          ?.id
+                                                  ? IconButton(
+                                                      icon: const Icon(
+                                                        Icons.delete,
+                                                        color: Colors.red,
+                                                      ),
+                                                      onPressed: () =>
+                                                          deleteComment(
+                                                            c['id'],
+                                                          ),
+                                                    )
+                                                  : null,
+                                            ),
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: TextField(
+                                                  controller: commentController,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                        hintText:
+                                                            "Write a comment...",
+                                                        border:
+                                                            InputBorder.none,
+                                                      ),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.send),
+                                                onPressed: () async {
+                                                  final text = commentController
+                                                      .text
+                                                      .trim();
+                                                  if (text.isNotEmpty) {
+                                                    await addComment(
+                                                      pub['id'],
+                                                      text,
+                                                    );
+                                                    commentController.clear();
+                                                    setState(() {});
+                                                  }
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
                               ],
                             ),
-
-                            if (pub['content'] != null) ...[
-                              const SizedBox(height: 5),
-                              Text(pub['content']),
-                            ],
-
-                            if (pub['image'] != null) ...[
-                              const SizedBox(height: 5),
-                              Image.network(pub['image']),
-                            ],
-
-                            const SizedBox(height: 5),
-                            Row(
-                              children: [
-                                Text('Likes: ${pub['likes'] ?? 0}'),
-                                const SizedBox(width: 10),
-                                IconButton(
-                                  icon: const Icon(Icons.thumb_up),
-                                  onPressed: () =>
-                                      likePublication(pub['id'].toString()),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      },
                     );
                   },
                 );
               },
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(15.0),
-            child: Column(
-              children: [
-                MyTextField(
-                  controller: textController,
-                  hintText: "Write something...",
-                  obscureText: false,
+
+          // POST BOX
+          // Remplace le bloc "POST BOX" dans ton Column par ce bloc
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: SafeArea(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 15,
+                  vertical: 10,
                 ),
-                const SizedBox(height: 5),
-                MyTextField(
-                  controller: imageController,
-                  hintText: "Image URL (optional)",
-                  obscureText: false,
+                color: Colors.grey[300],
+                child: Row(
+                  children: [
+                    // Icone image à gauche
+                    GestureDetector(
+                      onTap: pickImage,
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[900],
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.image, color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
+                    // TextField
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 15),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(25),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 5,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: TextField(
+                          controller: textController,
+                          decoration: const InputDecoration(
+                            hintText: "Write something...",
+                            border: InputBorder.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
+                    // Icone send à droite
+                    GestureDetector(
+                      onTap: postPublication,
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[900],
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.send, color: Colors.white),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 10),
-                ElevatedButton(
-                  onPressed: postPublication,
-                  child: const Text("Post"),
-                ),
-              ],
+              ),
             ),
           ),
         ],
       ),
+
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 0,
         onTap: _onNavTap,
@@ -328,18 +654,15 @@ class _HomePageState extends State<HomePage> {
             icon: Icon(Icons.person_add),
             label: 'Add Friends',
           ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_add),
+            label: 'Add Friends',
+          ),
         ],
-        selectedItemColor:
-            Colors.blue, // Couleur pour l'élément sélectionné (accentuée)
-        unselectedItemColor: Color.fromARGB(
-          255,
-          73,
-          73,
-          73,
-        ), // Couleur grise pour les éléments non sélectionnés
-        backgroundColor: Colors.white, // Fond de la BottomNavigationBar
-        type: BottomNavigationBarType
-            .fixed, // Important pour que tous les textes soient visibles
+        backgroundColor: Colors.black,
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white54,
+        type: BottomNavigationBarType.fixed,
       ),
     );
   }

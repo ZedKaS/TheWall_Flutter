@@ -1,5 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'home_page.dart';
+import 'profile_page.dart';
+import 'add_friends_page.dart';
+import 'chat_page.dart';
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
@@ -10,162 +16,362 @@ class MessagesPage extends StatefulWidget {
 
 class _MessagesPageState extends State<MessagesPage> {
   final supabase = Supabase.instance.client;
-
   late Future<List<Map<String, dynamic>>> _friendsFuture;
+  String? myUsername;
+
+  // Pour l'envoi d'image
+  XFile? selectedImage;
+  String? uploadedImageUrl;
 
   @override
   void initState() {
     super.initState();
     _friendsFuture = _fetchFriends();
+    _loadMyUsername();
   }
 
-  // --------------------------------------------------
-  // Fonction pour récupérer les amis de l'utilisateur
-  // --------------------------------------------------
+  Future<void> _loadMyUsername() async {
+    final user = supabase.auth.currentUser!;
+    final data = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .single();
+    setState(() => myUsername = data['username']);
+  }
+
   Future<List<Map<String, dynamic>>> _fetchFriends() async {
     final user = supabase.auth.currentUser;
     if (user == null) return [];
 
-    try {
-      final response = await supabase
-          .from('friends')
-          .select('''
+    final response = await supabase
+        .from('friends')
+        .select('''
           id,
           user_id,
           friend_id,
           created_at,
-          friend:user_id (
-            username,
-            avatar_url
-          ),
-          me:friend_id (
-            username,
-            avatar_url
-          )
+          friend:user_id (username, avatar_url, online),
+          me:friend_id (username, avatar_url, online)
         ''')
-          .or('user_id.eq.${user.id}, friend_id.eq.${user.id}');
+        .or('user_id.eq.${user.id},friend_id.eq.${user.id}');
 
-      final List<Map<String, dynamic>> result = List<Map<String, dynamic>>.from(
-        response,
-      );
+    final rows = List<Map<String, dynamic>>.from(response);
+    final myId = user.id;
+    final Map<String, Map<String, dynamic>> uniqueFriends = {};
 
-      final List<Map<String, dynamic>> finalList = [];
+    for (var row in rows) {
+      final iAmUser = row['user_id'] == myId;
+      final friendId = iAmUser ? row['friend_id'] : row['user_id'];
+      final friendData = iAmUser ? row['me'] : row['friend'];
 
-      for (var row in result) {
-        final bool iAmUser = row['user_id'] == user.id;
+      uniqueFriends[friendId] = {
+        'id': friendId,
+        'username': friendData['username'],
+        'avatar_url': friendData['avatar_url'],
+        'online': friendData['online'] ?? false,
+        'created_at': row['created_at'],
+      };
+    }
 
-        final friendData = iAmUser ? row['me'] : row['friend'];
+    return uniqueFriends.values.toList();
+  }
 
-        if (friendData != null) {
-          finalList.add({
-            'username': friendData['username'],
-            'avatar_url': friendData['avatar_url'],
-            'created_at': row['created_at'],
-          });
-        }
-      }
+  // 🔥 Unread messages
+  Future<int> _getUnreadCount(String friendId) async {
+    final myId = supabase.auth.currentUser!.id;
+    final response = await supabase
+        .from('messages')
+        .select()
+        .eq('sender_id', friendId)
+        .eq('receiver_id', myId)
+        .eq('seen', false);
+    return response.length;
+  }
 
-      // 🔥 Remove duplicates (important)
-      final uniqueFriends = <String, Map<String, dynamic>>{};
-      for (var friend in finalList) {
-        uniqueFriends[friend['username']] = friend;
-      }
+  Future<String> _getLastMessage(String friendId, String friendUsername) async {
+    final myId = supabase.auth.currentUser!.id;
+    final response = await supabase
+        .from('messages')
+        .select()
+        .or(
+          'and(sender_id.eq.$myId,receiver_id.eq.$friendId),'
+          'and(sender_id.eq.$friendId,receiver_id.eq.$myId)',
+        )
+        .order('created_at', ascending: false)
+        .limit(1);
 
-      return uniqueFriends.values.toList();
+    if (response.isEmpty) return "No messages yet";
+
+    final msg = response.first;
+    final isMe = msg['sender_id'] == myId;
+    final senderName = isMe ? "@$myUsername" : "@$friendUsername";
+    final text = msg["content"];
+    final image = msg["image_url"];
+
+    if (text != null && image != null) return "$senderName 📷 + $text";
+    if (image != null) return "$senderName 📷 Photo";
+    if (text != null) return "$senderName $text";
+    return "$senderName Message";
+  }
+
+  // 🔹 Upload image
+  Future<void> pickAndUploadImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+
+    final bytes = await picked.readAsBytes();
+    final ext = picked.path.split('.').last;
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+    try {
+      await supabase.storage.from('chat-images').uploadBinary(fileName, bytes);
+      final url = supabase.storage.from('chat-images').getPublicUrl(fileName);
+      setState(() {
+        selectedImage = picked;
+        uploadedImageUrl = url;
+      });
     } catch (e) {
-      print("Error fetching friends: $e");
-      return [];
+      print("Upload failed: $e");
+      setState(() {
+        selectedImage = null;
+        uploadedImageUrl = null;
+      });
     }
   }
 
-  // --------------------------------------------------
-  // Bottom Navigation
-  // --------------------------------------------------
+  Color onlineColor(bool online) => online ? Colors.green : Colors.red;
+
   void _onNavTap(BuildContext context, int index) {
     if (index == 0) {
-      Navigator.pushReplacementNamed(context, '/home');
-    } else if (index == 1) {
-      // already on messages
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomePage()),
+      );
     } else if (index == 2) {
-      Navigator.pushReplacementNamed(context, '/profile');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const ProfilePage()),
+      );
     } else if (index == 3) {
-      Navigator.pushReplacementNamed(context, '/addFriends');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const AddFriendsPage()),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Messages")),
-
-      // --------------------------------------------------
-      // BODY – LISTE DES AMIS
-      // --------------------------------------------------
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _friendsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text("You have no friends yet."));
-          }
-
-          final friends = snapshot.data!;
-
-          return ListView.builder(
-            itemCount: friends.length,
-            itemBuilder: (context, index) {
-              final friend = friends[index];
-              final username = friend['username'] ?? "Unknown";
-              final avatarPath = friend['avatar_url'];
-
-              final avatarUrl = (avatarPath != null && avatarPath.isNotEmpty)
-                  ? supabase.storage
-                        .from('profile-pictures')
-                        .getPublicUrl(avatarPath)
-                  : null;
-
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    radius: 25,
-                    backgroundImage: avatarUrl != null
-                        ? NetworkImage(avatarUrl)
-                        : const NetworkImage(
-                            "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-                          ),
-                  ),
-                  title: Text(
-                    username,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text("Friends since: ${friend['created_at']}"),
-
-                  // 👉 Ici : ouvre conversation (DM) dans le futur
-                  onTap: () {
-                    // Navigator.push(context, MaterialPageRoute(
-                    //   builder: (_) => ChatPage(friendId: ...)
-                    // ));
-                  },
-                ),
-              );
-            },
-          );
-        },
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        centerTitle: true,
+        title: const Text("Messages", style: TextStyle(color: Colors.white)),
       ),
 
-      // --------------------------------------------------
-      // BOTTOM NAVIGATION BAR
-      // --------------------------------------------------
+      body: Column(
+        children: [
+          // 🔹 Barre d'amis en haut avec bulle
+          SizedBox(
+            height: 100,
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _friendsFuture,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const SizedBox();
+                final friends = snapshot.data!;
+                return ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 10,
+                  ),
+                  itemCount: friends.length,
+                  itemBuilder: (context, index) {
+                    final friend = friends[index];
+                    final avatarUrl = friend['avatar_url'] != null
+                        ? supabase.storage
+                              .from('profile-pictures')
+                              .getPublicUrl(friend['avatar_url'])
+                        : null;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min, // 🔹 important !
+                        children: [
+                          Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 25,
+                                backgroundImage: avatarUrl != null
+                                    ? NetworkImage(avatarUrl)
+                                    : null,
+                                backgroundColor: Colors.grey[300],
+                                child: avatarUrl == null
+                                    ? const Icon(Icons.person, size: 25)
+                                    : null,
+                              ),
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: onlineColor(friend['online']),
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Flexible(
+                            // 🔹 permet de réduire le texte si espace limité
+                            child: Text(
+                              friend['username'],
+                              style: const TextStyle(fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+
+          // 🔹 Liste des amis/messages
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _friendsFuture,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || myUsername == null)
+                  return const Center(child: CircularProgressIndicator());
+                final friends = snapshot.data!;
+                if (friends.isEmpty)
+                  return const Center(child: Text("You have no friends yet."));
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(10),
+                  itemCount: friends.length,
+                  itemBuilder: (context, index) {
+                    final friend = friends[index];
+                    final friendId = friend['id'];
+                    final username = friend['username'];
+                    final avatarUrl = friend['avatar_url'] != null
+                        ? supabase.storage
+                              .from('profile-pictures')
+                              .getPublicUrl(friend['avatar_url'])
+                        : null;
+
+                    return FutureBuilder(
+                      future: Future.wait([
+                        _getLastMessage(friendId, username),
+                        _getUnreadCount(friendId),
+                      ]),
+                      builder: (context, snap) {
+                        if (!snap.hasData) return const SizedBox();
+                        final lastMessage = snap.data![0] as String;
+                        final unreadCount = snap.data![1] as int;
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            vertical: 6,
+                            horizontal: 10,
+                          ),
+                          elevation: 3,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              radius: 25,
+                              backgroundImage: avatarUrl != null
+                                  ? NetworkImage(avatarUrl)
+                                  : null,
+                              backgroundColor: Colors.grey[300],
+                              child: avatarUrl == null
+                                  ? const Icon(Icons.person, size: 25)
+                                  : null,
+                            ),
+                            title: Text(
+                              username,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              lastMessage,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: unreadCount > 0
+                                ? Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.blue,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Text(
+                                      unreadCount.toString(),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  )
+                                : null,
+                            onTap: () async {
+                              final myId = supabase.auth.currentUser!.id;
+                              await supabase
+                                  .from('messages')
+                                  .update({'seen': true})
+                                  .eq('sender_id', friendId)
+                                  .eq('receiver_id', myId)
+                                  .eq('seen', false);
+
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ChatPage(
+                                    friendId: friendId,
+                                    friendUsername: username,
+                                    friendAvatarUrl: avatarUrl,
+                                  ),
+                                ),
+                              );
+
+                              setState(() {
+                                _friendsFuture = _fetchFriends();
+                              });
+                            },
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: 1,
         onTap: (index) => _onNavTap(context, index),
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: const Color.fromARGB(255, 73, 73, 73),
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.black,
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white54,
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.post_add), label: 'Post'),

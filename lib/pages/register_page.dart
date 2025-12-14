@@ -40,7 +40,6 @@ class _RegisterPageState extends State<RegisterPage> {
       return;
     }
 
-    // Show loader
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -48,7 +47,6 @@ class _RegisterPageState extends State<RegisterPage> {
     );
 
     try {
-      // Créer l'utilisateur dans Supabase Auth (sans mail de confirmation)
       final AuthResponse authResponse = await supabase.auth.signUp(
         email: email,
         password: password,
@@ -61,7 +59,6 @@ class _RegisterPageState extends State<RegisterPage> {
         return;
       }
 
-      // Insérer le profil dans la table "profiles"
       await supabase.from('profiles').insert({
         'id': user.id,
         'email': email,
@@ -71,7 +68,7 @@ class _RegisterPageState extends State<RegisterPage> {
         'created': DateTime.now().toIso8601String(),
       });
 
-      Navigator.pop(context); // fermer loader
+      Navigator.pop(context);
       displayMessage("Account created successfully!");
     } on AuthException catch (e) {
       Navigator.pop(context);
@@ -92,41 +89,125 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[300],
+      backgroundColor: Colors.white, // fond blanc comme LoginPage
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 25),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.lock, size: 100),
-                const SizedBox(height: 25),
-                MyTextField(controller: emailController, hintText: 'Email', obscureText: false),
+                // --- LOGO ---
+                SizedBox(
+                  width: 250,
+                  height: 150,
+                  child: Image.asset(
+                    'lib/assets/sigmawall.png',
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(height: 15),
+
+                // --- Champs texte ---
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(controller: emailController, hintText: 'Email', obscureText: false),
+                  ),
+                ),
                 const SizedBox(height: 10),
-                MyTextField(controller: passwordController, hintText: 'Password', obscureText: true),
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(controller: passwordController, hintText: 'Password', obscureText: true),
+                  ),
+                ),
                 const SizedBox(height: 10),
-                MyTextField(controller: confirmPasswordController, hintText: 'Confirm Password', obscureText: true),
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(controller: confirmPasswordController, hintText: 'Confirm Password', obscureText: true),
+                  ),
+                ),
                 const SizedBox(height: 10),
-                MyTextField(controller: nomController, hintText: 'Nom', obscureText: false),
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(controller: nomController, hintText: 'Nom', obscureText: false),
+                  ),
+                ),
                 const SizedBox(height: 10),
-                MyTextField(controller: prenomController, hintText: 'Prenom', obscureText: false),
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(controller: prenomController, hintText: 'Prenom', obscureText: false),
+                  ),
+                ),
                 const SizedBox(height: 10),
-                MyTextField(controller: usernameController, hintText: 'Username', obscureText: false),
+                SizedBox(
+                  width: 300,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MyTextField(controller: usernameController, hintText: 'Username', obscureText: false),
+                  ),
+                ),
                 const SizedBox(height: 20),
-                MyButton(onTap: signUp, text: 'Sign Up'),
+
+                // --- Bouton Sign Up avec icône ---
+                SizedBox(
+                  width: 200,
+                  height: 50,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: MyButton(
+                      onTap: signUp,
+                      text: '',
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.person_add, color: Colors.black),
+                          SizedBox(width: 8),
+                          Text(
+                            'Sign Up',
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 10),
+
+                // --- Lien Login ---
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('Already have an account?'),
-                    const SizedBox(width: 4),
+                    Text(
+                      'Already a member?',
+                      style: TextStyle(color: Colors.black.withOpacity(0.6)),
+                    ),
+                    const SizedBox(width: 6),
                     GestureDetector(
                       onTap: widget.onTap,
-                      child: const Text('Login now', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Login now',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF4BA3FF),
+                        ),
+                      ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 20),
               ],
             ),
           ),

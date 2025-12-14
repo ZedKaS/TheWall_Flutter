@@ -18,7 +18,7 @@ class SessionManager {
           .eq('id', user.id)
           .select()
           .single(); // <- récupère la ligne mise à jour
-      print("goOnline updated row: $updated");
+      print(" ${updated['username']} est en ligne ");
       _isOnline = true;
     }
   }
@@ -33,7 +33,7 @@ class SessionManager {
           .eq('id', user.id)
           .select()
           .single(); // récupère la ligne mise à jour
-      print("goOffline updated row: $updated");
+      print(" ${updated['username']} est hors ligne ");
       _isOnline = false;
     }
   }
